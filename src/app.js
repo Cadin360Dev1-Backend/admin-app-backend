@@ -8,9 +8,25 @@ const app = express();
 
 // Middleware setup:
 
-// Enable CORS for all origins (or specify allowed origins for production)
-// `origin: true` allows any origin, `credentials: true` allows cookies to be sent
-app.use(cors({ origin: true, credentials: true }));
+// Define allowed origins from environment variables.
+// It can be a single URL or a comma-separated list of URLs.
+const allowedOrigins = process.env.FRONTEND_ORIGIN ?
+  process.env.FRONTEND_ORIGIN.split(',').map(url => url.trim()) :
+  [];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like same-origin requests, mobile apps, or curl requests)
+    // Also allow if the origin is in our list of allowed origins
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      // If the origin is not allowed, return an error
+      callback(new Error(`CORS policy for this site does not allow access from the specified Origin: ${origin}`), false);
+    }
+  },
+  credentials: true // IMPORTANT: This allows cookies to be sent and received cross-origin
+}));
 
 // Parse cookies attached to the client request object
 app.use(cookieParser());
