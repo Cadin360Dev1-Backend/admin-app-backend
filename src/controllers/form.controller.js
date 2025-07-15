@@ -27,11 +27,11 @@ export const submitForm = async (req, res) => {
     }
 
     // Basic validation for mandatory fields (for the original bundle form)
-    if (!form_type || !page_Name || !page_url || !name || !email || !user_type || !college_name) {
+    if (!form_type || !page_Name || !page_url || !name || !email || !user_type ) {
       return res.status(400).json({
         statusCode: 400,
         success: false,
-        errors: [{ message: "Missing one or more mandatory form fields (form_type, page_Name, page_url, name, email, user_type, college_name)." }],
+        errors: [{ message: "Missing one or more mandatory form fields (form_type, page_Name, page_url, name, email, user_type)." }],
         message: "Missing one or more mandatory form fields."
       });
     }
