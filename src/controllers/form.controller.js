@@ -19,7 +19,12 @@ export const submitForm = async (req, res) => {
     } = req.body;
 
     // Extract geo_ip from the request
-    const geo_ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    // IMPORTANT: When using 'x-forwarded-for', it can be a comma-separated list.
+    // We should take the first IP in the list, which is typically the client's IP.
+    let geo_ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    if (geo_ip && geo_ip.includes(',')) {
+      geo_ip = geo_ip.split(',')[0].trim();
+    }
 
     // Basic validation for mandatory fields (for the original bundle form)
     if (!form_type || !page_Name || !page_url || !name || !email || !user_type || !college_name) {
@@ -123,7 +128,12 @@ export const submitSamplePdfForm = async (req, res) => {
     const form_type = 'sample_pdf_download_form';
 
     // Extract geo_ip from the request
-    const geo_ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    // IMPORTANT: When using 'x-forwarded-for', it can be a comma-separated list.
+    // We should take the first IP in the list, which is typically the client's IP.
+    let geo_ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    if (geo_ip && geo_ip.includes(',')) {
+      geo_ip = geo_ip.split(',')[0].trim();
+    }
 
     // Basic validation for mandatory fields for sample_pdf_download_form
     if (!name || !email || !page_Name || !page_url) {
