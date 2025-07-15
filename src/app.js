@@ -26,7 +26,7 @@ if (environment === 'development') {
     origin: (origin, callback) => {
       // Allow server-to-server or same-origin requests, AND null origin for specific scenarios
       // Also allow origins listed in CORS_ORIGIN
-      if (!origin || allowedOrigins.includes(origin) || origin === 'null') { // Added '|| origin === 'null''
+      if (!origin || allowedOrigins.includes(origin) || origin === 'null') {
         callback(null, true);
       } else {
         callback(new Error(`CORS policy for this site does not allow access from the specified Origin: ${origin}`), false);
