@@ -31,7 +31,7 @@ export const submitForm = async (req, res) => {
       return res.status(400).json({
         statusCode: 400,
         success: false,
-        errors: [{ message: "Missing one or more mandatory form fields (form_type, page_Name, page_url, name, email, user_type)." }],
+        errors: [{ message: `Missing one or more mandatory form fields (${!form_type ? 'form_type' : ''}, ${!page_Name ? 'page_Name' : ''}, ${!page_url ? 'page_url' : ''}, ${!name ? 'name' : ''}, ${!email ? 'email' : ''}, ${!user_type ? 'user_type' : ''}).` }],
         message: "Missing one or more mandatory form fields."
       });
     }
