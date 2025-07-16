@@ -4,8 +4,8 @@ import {
         fetchBundleSubmissions,
         fetchSampleSubmissions,
         submitForm,
-        submitSamplePdfForm
-    }from '../controllers/form.controller.js';
+        submitSamplePdfForm,
+     }from '../controllers/form.controller.js';
     
 const router = express.Router();
 
