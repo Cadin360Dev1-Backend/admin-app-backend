@@ -221,3 +221,69 @@ export const submitSamplePdfForm = async (req, res) => {
     });
   }
 };
+
+// Controller function to fetch all bundle form submissions
+export const fetchBundleSubmissions = async (req, res) => {
+  try {
+    // Fetch all forms where form_type is 'bundle_form'
+    const submissions = await Form.find({ form_type: 'bundle_form' });
+    res.status(200).json({
+      statusCode: 200,
+      success: true,
+      message: "Bundle form submissions fetched successfully!",
+      data: submissions,
+    });
+  } catch (error) {
+    console.error("Error fetching bundle form submissions:", error);
+    res.status(500).json({
+      statusCode: 500,
+      success: false,
+      errors: [{ message: "An unexpected internal server error occurred." }],
+      message: "Internal server error."
+    });
+  }
+};
+
+// Controller function to fetch all sample PDF form submissions
+export const fetchSampleSubmissions = async (req, res) => {
+  try {
+    // Fetch all forms where form_type is 'sample_pdf_download_form'
+    const sampleSubmissions = await Form.find({ form_type: 'sample_pdf_download_form' });
+    res.status(200).json({
+      statusCode: 200,
+      success: true,
+      message: "Sample PDF form submissions fetched successfully!",
+      data: sampleSubmissions,
+    });
+  } catch (error) {
+    console.error("Error fetching sample PDF form submissions:", error);
+    res.status(500).json({
+      statusCode: 500,
+      success: false,
+      errors: [{ message: "An unexpected internal server error occurred." }],
+      message: "Internal server error."
+    });
+  }
+};
+
+// Controller function to fetch all form submissions (both types)
+export const fetchAllSubmissions = async (req, res) => {
+  try {
+    // Fetch all forms regardless of form_type
+    const allSubmissions = await Form.find({});
+    res.status(200).json({
+      statusCode: 200,
+      success: true,
+      message: "All form submissions fetched successfully!",
+      data: allSubmissions,
+    });
+  } catch (error) {
+    console.error("Error fetching all form submissions:", error);
+    res.status(500).json({
+      statusCode: 500,
+      success: false,
+      errors: [{ message: "An unexpected internal server error occurred." }],
+      message: "Internal server error."
+    });
+  }
+};
