@@ -53,8 +53,7 @@ export const sendOtpEmail = async (toEmail, otp, requestingEmail = toEmail) => {
           <div style="padding: 25px 30px; background-color: #f8f8f8; text-align: center; font-size: 13px; color: #777; border-top: 1px solid #eee;">
             <p style="margin-top: 0; margin-bottom: 5px;">If you did not request this OTP, please ignore this email or contact support.</p>
             <p style="margin: 0;">Regards,<br>Your Admin App Team</p>
-            <p style="margin-top: 15px; font-size: 11px; color: #999;">This is an automated message from the Admin App Backend.</p> <!-- New line added here -->
-          </div>
+            <p style="margin-top: 15px; font-size: 11px; color: #999;">This is an automated message from the Admin App Backend.</p> </div>
         </div>
       </div>
     `,
@@ -67,6 +66,31 @@ export const sendOtpEmail = async (toEmail, otp, requestingEmail = toEmail) => {
   } catch (err) {
     // Log the error and re-throw it to be caught by the calling function (e.g., auth.controller.js)
     console.error(`❌ Failed to send OTP to ${toEmail}:`, err);
+    throw new Error('Email sending failed. Please check your mailer configuration and network connection.');
+  }
+};
+
+/**
+ * Sends a generic email to a specified recipient with a given subject and HTML content.
+ * @param {string} toEmail - The email address of the recipient.
+ * @param {string} subject - The subject line of the email.
+ * @param {string} htmlContent - The HTML body of the email.
+ * @returns {Promise<void>} A promise that resolves if the email is sent successfully,
+ * or rejects with an error if sending fails.
+ */
+export const sendEmail = async (toEmail, subject, htmlContent) => {
+  const mailOptions = {
+    from: process.env.EMAIL_FROM,
+    to: toEmail,
+    subject: subject,
+    html: htmlContent,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`📨 Email successfully sent to ${toEmail} with subject: "${subject}"`);
+  } catch (err) {
+    console.error(`❌ Failed to send email to ${toEmail} with subject "${subject}":`, err);
     throw new Error('Email sending failed. Please check your mailer configuration and network connection.');
   }
 };

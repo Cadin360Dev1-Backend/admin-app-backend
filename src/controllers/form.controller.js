@@ -1,5 +1,6 @@
 import { Form } from '../models/FormData.model.js';
 import { getGeolocation } from '../utils/geolocation.js';
+import { sendEmail } from '../utils/mailer.js'; // Import the generic sendEmail function
 
 // Controller function to handle Bundle form submission
 export const submitForm = async (req, res) => {
@@ -37,7 +38,7 @@ export const submitForm = async (req, res) => {
     }
 
     // Email format validation using regex
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({
         statusCode: 400,
@@ -86,11 +87,38 @@ export const submitForm = async (req, res) => {
     // Save to DB
     const savedForm = await newFormSubmission.save();
 
+    // --- Send Thank You Email ---
+    const subject = `Thank You for Your Interest in ${form_type === 'bundle_form' ? 'Our Bundle Offer' : 'Our Products'}!`;
+    const htmlContent = `
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 15px; color: #333; line-height: 1.6; background-color: #f4f7f6; padding: 20px;">
+        <div style="max-width: 600px; margin: 20px auto; background-color: #fff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); overflow: hidden; border: 1px solid #e0e0e0;">
+          <div style="padding: 30px; border-bottom: 1px solid #eee; background-color: #fdfdfd;">
+            <h1 style="font-size: 24px; color: #2a64ad; margin-top: 0; margin-bottom: 15px; text-align: center;">Thank You for Your Interest, ${name}!</h1>
+            <p style="text-align: center; color: #555;">We appreciate you showing interest in our ${page_Name}.</p>
+            <p style="text-align: center; color: #555;">We've received your submission and will get back to you shortly if needed.</p>
+            <p style="text-align: center; font-size: 14px; color: #666;">In the meantime, feel free to explore more on our website: <a href="${page_url}" style="color: #2a64ad; text-decoration: none;">${page_url}</a></p>
+          </div>
+          <div style="padding: 25px 30px; background-color: #f8f8f8; text-align: center; font-size: 13px; color: #777; border-top: 1px solid #eee;">
+            <p style="margin-top: 0; margin-bottom: 5px;">This is an automated email, please do not reply.</p>
+            <p style="margin: 0;">Regards,<br>The Admin App Team</p>
+          </div>
+        </div>
+      </div>
+    `;
+    try {
+      await sendEmail(email, subject, htmlContent);
+    } catch (emailError) {
+      console.error("Failed to send thank you email:", emailError);
+      // You might choose to still send a success response to the user
+      // but log the email sending failure for internal monitoring.
+    }
+    // --- End Send Thank You Email ---
+
     // Success response
     res.status(201).json({
       statusCode: 201,
       success: true,
-      message: "Form details saved successfully!",
+      message: "Form details saved successfully! A thank-you email has been sent.",
       data: savedForm,
     });
 
@@ -192,11 +220,39 @@ export const submitSamplePdfForm = async (req, res) => {
     // Save to DB
     const savedForm = await newFormSubmission.save();
 
+    // --- Send Thank You Email for PDF ---
+    const pdfSubject = `Thank You for Downloading the Sample PDF from ${page_Name}!`;
+    const pdfHtmlContent = `
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 15px; color: #333; line-height: 1.6; background-color: #f4f7f6; padding: 20px;">
+        <div style="max-width: 600px; margin: 20px auto; background-color: #fff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); overflow: hidden; border: 1px solid #e0e0e0;">
+          <div style="padding: 30px; border-bottom: 1px solid #eee; background-color: #fdfdfd;">
+            <h1 style="font-size: 24px; color: #2a64ad; margin-top: 0; margin-bottom: 15px; text-align: center;">Thank You, ${name}!</h1>
+            <p style="text-align: center; color: #555;">We hope you find the sample PDF useful.</p>
+            <p style="text-align: center; color: #555;">You can download your PDF here (if applicable, or link to the download on your site):</p>
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="${website_url || page_url}" style="display: inline-block; background-color: #2a64ad; color: #ffffff; font-size: 18px; font-weight: bold; padding: 15px 30px; border-radius: 8px; text-decoration: none; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">Download PDF</a>
+            </div>
+            <p style="text-align: center; font-size: 14px; color: #666;">If you have any questions, feel free to visit our website: <a href="${page_url}" style="color: #2a64ad; text-decoration: none;">${page_url}</a></p>
+          </div>
+          <div style="padding: 25px 30px; background-color: #f8f8f8; text-align: center; font-size: 13px; color: #777; border-top: 1px solid #eee;">
+            <p style="margin-top: 0; margin-bottom: 5px;">This is an automated email, please do not reply.</p>
+            <p style="margin: 0;">Regards,<br>The Admin App Team</p>
+          </div>
+        </div>
+      </div>
+    `;
+    try {
+      await sendEmail(email, pdfSubject, pdfHtmlContent);
+    } catch (emailError) {
+      console.error("Failed to send sample PDF thank you email:", emailError);
+    }
+    // --- End Send Thank You Email for PDF ---
+
     // Success response
     res.status(201).json({
       statusCode: 201,
       success: true,
-      message: "Sample PDF form details saved successfully! PDF download can now be triggered.",
+      message: "Sample PDF form details saved successfully! A thank-you email has been sent. PDF download can now be triggered.",
       data: savedForm,
       // You can add a specific flag or URL for PDF download here for the frontend
       // e.g., pdf_download_url: '/download/sample-pdf'
