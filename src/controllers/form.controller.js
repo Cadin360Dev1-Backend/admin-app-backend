@@ -5,7 +5,11 @@ import { sendEmail } from '../utils/mailer.js'; // Import the generic sendEmail 
 // Controller function to handle Bundle form submission
 export const submitForm = async (req, res) => {
   try {
-    // Extract form data from the request body
+    // Debugging line: Log the incoming request body to see what's being received
+    console.log("submitForm: Incoming request body:", req.body);
+
+    // Provide default empty object for destructuring if req.body is undefined or null
+    // This prevents the TypeError: Cannot destructure property 'form_type' of 'req.body' as it is undefined.
     const {
       form_type,
       bundle_form,
@@ -17,7 +21,7 @@ export const submitForm = async (req, res) => {
       college_name,
       reason,
       website_url,
-    } = req.body;
+    } = req.body || {}; // Defensive destructuring
 
     // Extract geo_ip from the request
     // IMPORTANT: When using 'x-forwarded-for', it can be a comma-separated list.
@@ -38,7 +42,7 @@ export const submitForm = async (req, res) => {
     }
 
     // Email format validation using regex
-const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({
         statusCode: 400,
@@ -145,13 +149,18 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Controller function to handle sample PDF download form submission
 export const submitSamplePdfForm = async (req, res) => {
   try {
+    // Debugging line: Log the incoming request body to see what's being received
+    console.log("submitSamplePdfForm: Incoming request body:", req.body);
+
+    // Provide default empty object for destructuring if req.body is undefined or null
+    // This prevents the TypeError: Cannot destructure property 'name' of 'req.body' as it is undefined.
     const {
       name,
       email,
       page_Name,
       page_url,
       website_url,
-    } = req.body;
+    } = req.body || {}; // Defensive destructuring
 
     const form_type = 'sample_pdf_download_form';
 
