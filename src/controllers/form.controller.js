@@ -296,79 +296,123 @@ export const submitSamplePdfForm = async (req, res) => {
 /**
  * Controller function to handle sending a custom Thank You message.
  * This function is independent of form submissions and allows an admin
- * to send a customized email directly. It now supports sending to a single
- * email or an array of emails.
+ * to send customized emails directly. It now supports sending to a single
+ * email request object or an array of email request objects.
  *
  * Expected request body:
+ * If sending one email:
  * {
- * "toEmails": "recipient@example.com", // Single email
+ * "toEmails": "recipient@example.com", // Single email string or array of strings
  * "subject": "Custom Thank You from My App",
  * "message": "<p>Hello,</p><p>This is a <strong>custom</strong> thank you message!</p>"
  * }
- * OR
+ *
+ * If sending bulk emails (array of email requests):
+ * [
  * {
- * "toEmails": ["recipient1@example.com", "recipient2@example.com"], // Array of emails
- * "subject": "Custom Thank You from My App",
- * "message": "<p>Hello,</p><p>This is a <strong>custom</strong> thank you message!</p>"
+ * "toEmails": "recipient1@example.com", // Can be single string or array of strings here too
+ * "subject": "Custom Subject 1",
+ * "message": "<p>Message for recipient 1</p>"
+ * },
+ * {
+ * "toEmails": ["recipient2@example.com", "recipient3@example.com"], // Example: sending to multiple from one object
+ * "subject": "Custom Subject 2",
+ * "message": "<p>Message for recipients 2 & 3</p>"
  * }
+ * ]
  */
 export const handleThankYouSubmission = async (req, res) => {
   try {
     console.log("handleThankYouSubmission: Incoming request body:", req.body); // Debugging line
 
-    // Changed toEmails to accept string or array
-    const { toEmails, subject, message } = req.body || {};
+    const emailRequests = Array.isArray(req.body) ? req.body : [req.body]; // Ensure req.body is an array for iteration
 
-    // Basic validation for mandatory fields
-    if (!toEmails || toEmails.length === 0 || !subject || !message) {
+    if (!emailRequests || emailRequests.length === 0) {
       return res.status(400).json({
         statusCode: 400,
         success: false,
-        errors: [{ message: "Missing one or more mandatory fields (toEmails, subject, message)." }],
-        message: "Missing required email parameters."
+        errors: [{ message: "No email requests provided in the payload." }],
+        message: "Empty or invalid payload."
       });
     }
 
-    // Validate email format(s)
+    const successfulSends = [];
+    const failedSends = [];
     const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/;
     const validateEmail = (email) => emailRegex.test(email);
 
-    if (Array.isArray(toEmails)) {
-      // If it's an array, validate each email
-      const invalidEmails = toEmails.filter(email => !validateEmail(email));
-      if (invalidEmails.length > 0) {
-        return res.status(400).json({
-          statusCode: 400,
-          success: false,
-          errors: [{ message: `Invalid email format for: ${invalidEmails.join(', ')}` }],
-          message: "Invalid email format in array."
+    for (const request of emailRequests) {
+      const { toEmails, subject, message } = request;
+
+      // Validate mandatory fields for each request
+      if (!toEmails || toEmails.length === 0 || !subject || !message) {
+        failedSends.push({
+          request: request,
+          error: "Missing one or more mandatory fields (toEmails, subject, message)."
+        });
+        continue; // Skip to the next request
+      }
+
+      // Validate email format(s) for each request
+      let currentRecipients = toEmails;
+      if (!Array.isArray(toEmails)) {
+        currentRecipients = [toEmails]; // Convert single email string to array for consistent validation
+      }
+
+      const invalidEmailsInRequest = currentRecipients.filter(email => !validateEmail(email));
+      if (invalidEmailsInRequest.length > 0) {
+        failedSends.push({
+          request: request,
+          error: `Invalid email format for: ${invalidEmailsInRequest.join(', ')}`
+        });
+        continue; // Skip to the next request
+      }
+
+      try {
+        // Send the custom email(s) for the current request
+        await sendEmail(toEmails, subject, message); // Pass original toEmails (string or array)
+        successfulSends.push(request);
+      } catch (emailError) {
+        console.error(`Error sending email for request ${JSON.stringify(request)}:`, emailError);
+        failedSends.push({
+          request: request,
+          error: "Failed to send email due to server error.",
+          details: emailError.message // Include error message for debugging
         });
       }
-    } else if (!validateEmail(toEmails)) {
-      // If it's a single string, validate it
-      return res.status(400).json({
+    }
+
+    // Determine overall response based on success/failure
+    if (successfulSends.length > 0 && failedSends.length === 0) {
+      return res.status(200).json({
+        statusCode: 200,
+        success: true,
+        message: `Successfully sent ${successfulSends.length} email(s)!`,
+        successfulSends: successfulSends,
+      });
+    } else if (successfulSends.length > 0 && failedSends.length > 0) {
+      return res.status(207).json({ // 207 Multi-Status
+        statusCode: 207,
+        success: false, // Overall partial success
+        message: `Successfully sent ${successfulSends.length} email(s) but ${failedSends.length} failed.`,
+        successfulSends: successfulSends,
+        failedSends: failedSends,
+      });
+    } else {
+      return res.status(400).json({ // All failed or no valid requests
         statusCode: 400,
         success: false,
-        errors: [{ message: "Invalid recipient email format." }],
-        message: "Invalid email format."
+        message: "All email send requests failed or were invalid.",
+        failedSends: failedSends,
       });
     }
 
-    // Send the custom email(s)
-    await sendEmail(toEmails, subject, message);
-
-    res.status(200).json({
-      statusCode: 200,
-      success: true,
-      message: Array.isArray(toEmails) ? `Custom thank you email sent successfully to ${toEmails.length} recipients!` : "Custom thank you email sent successfully!",
-    });
-
   } catch (error) {
-    console.error("Error sending custom thank you email:", error);
+    console.error("Unhandled error in handleThankYouSubmission:", error);
     res.status(500).json({
       statusCode: 500,
       success: false,
-      errors: [{ message: "An unexpected internal server error occurred while sending email." }],
+      errors: [{ message: "An unexpected internal server error occurred." }],
       message: "Internal server error."
     });
   }
