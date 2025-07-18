@@ -1,5 +1,5 @@
 import express from 'express';
-import { requestOtp, verifyOtp, logoutAdmin, getMe } from '../controllers/auth.controller.js'; // Import getMe
+import { requestOtp, verifyOtp, logoutAdmin, getMe } from '../controllers/auth.controller.js';
 import jwt from 'jsonwebtoken'; // Used for token verification in middleware
 
 const router = express.Router();
@@ -59,7 +59,7 @@ router.get('/dashboard', authMiddleware, (req, res) => {
   res.json({ success: true, message: `Welcome back, ${req.admin.email}! You have access to the dashboard.` });
 });
 
-// NEW ROUTE: GET /api/auth/me: Retrieves details of the logged-in user
+// GET /api/auth/me: Retrieves details of the logged-in user
 router.get('/me', authMiddleware, getMe);
 
 export default router;

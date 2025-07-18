@@ -12,7 +12,7 @@ const adminSchema = new mongoose.Schema({
     match: [/^[^@]+@[^@]+\.[^@]+$/, 'Please enter a valid email address']
   },
   otp: {
-    type: Number,
+    type: Number, // Ensure OTP is stored as a Number
     // OTP is not required when an admin account is first created, only when an OTP is generated
     // It will be null after successful verification or before an OTP request
   },
@@ -31,4 +31,3 @@ const adminSchema = new mongoose.Schema({
 
 // Create and export the Admin model based on the schema
 export const Admin = mongoose.model('Admin', adminSchema);
-
