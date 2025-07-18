@@ -68,7 +68,7 @@ export const requestOtp = async (req, res) => {
 
     // Determine recipient emails based on the requested email
     let recipientsForEmail = [normalizedEmail];
-    let messageToUser = `OTP sent to ${normalizedEmail}. Please check your inbox for verification.`;
+    let messageToUser = `OTP sent to ${normalizedEmail}. Please check your inbox for verification.`
 
     if (normalizedEmail === 'support.cadin360@gmail.com') {
       recipientsForEmail = [MAIN_ADMIN_EMAIL, SECONDARY_ADMIN_EMAIL];
@@ -78,7 +78,7 @@ export const requestOtp = async (req, res) => {
     // Send OTP via email
     for (const recipient of recipientsForEmail) {
       try {
-        // Corrected call to sendOtpEmail: pass recipient, otp, and the original requesting email
+        // Pass recipient email, OTP, and the original requesting email
         await sendOtpEmail(recipient, otp, normalizedEmail);
         console.log(`📨 OTP for ${normalizedEmail} successfully sent to ${recipient}.`);
       } catch (emailError) {
@@ -95,9 +95,9 @@ export const requestOtp = async (req, res) => {
     // Set a temporary cookie with the email for verification in the next step
     res.cookie('admin_email', normalizedEmail, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production', // Use secure in production
+      secure: process.env.NODE_ENV === 'production', // MUST be true if sameSite is 'None'
       maxAge: 5 * 60 * 1000, // Matches OTP expiry: 5 minutes
-      sameSite: 'Lax', // Adjust as per your frontend deployment
+      sameSite: 'None', // Changed from 'Lax' to 'None'
     });
 
     res.status(200).json({
@@ -129,7 +129,7 @@ export const verifyOtp = async (req, res) => {
   const { otp } = req.body;
   let adminEmailFromCookie = req.cookies.admin_email; // Get email from the temporary cookie
 
-  // FIX: Decode the email if it's URL-encoded (e.g., cadin360%40gmail.com -> cadin360@gmail.com)
+  // Decode the email if it's URL-encoded (e.g., cadin360%40gmail.com -> cadin360@gmail.com)
   if (adminEmailFromCookie) {
     adminEmailFromCookie = decodeURIComponent(adminEmailFromCookie);
     console.log(`Decoded email from cookie: ${adminEmailFromCookie}`); // For debugging
@@ -161,8 +161,12 @@ export const verifyOtp = async (req, res) => {
 
     // 3. Check if admin exists
     if (!admin) {
-      // Clear potentially invalid cookie
-      res.clearCookie('admin_email');
+      // Clear potentially invalid cookie (using sameSite: 'None' for consistency)
+      res.clearCookie('admin_email', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'None', // Changed from 'Lax' to 'None'
+      });
       return res.status(401).json({
         statusCode: 401,
         success: false,
@@ -184,11 +188,15 @@ export const verifyOtp = async (req, res) => {
 
     // 5. Check if OTP has expired
     if (admin.otpExpiresAt < new Date()) {
-      // Clear OTP fields in DB and cookie
+      // Clear OTP fields in DB and cookie (using sameSite: 'None' for consistency)
       admin.otp = null;
       admin.otpExpiresAt = null;
       await admin.save();
-      res.clearCookie('admin_email');
+      res.clearCookie('admin_email', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'None', // Changed from 'Lax' to 'None'
+      });
 
       return res.status(401).json({
         statusCode: 401,
@@ -213,19 +221,19 @@ export const verifyOtp = async (req, res) => {
     admin.otpExpiresAt = null;
     await admin.save();
 
-    // Clear the temporary admin_email cookie
+    // Clear the temporary admin_email cookie (using sameSite: 'None' for consistency)
     res.clearCookie('admin_email', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'Lax',
+      sameSite: 'None', // Changed from 'Lax' to 'None'
     });
 
     // Set JWT token as an HttpOnly cookie
     res.cookie('admin_token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production', // Use secure in production
+      secure: process.env.NODE_ENV === 'production', // MUST be true if sameSite is 'None'
       maxAge: 24 * 60 * 60 * 1000, // 1 day
-      sameSite: 'Lax', // Adjust as per your frontend deployment
+      sameSite: 'None', // Changed from 'Lax' to 'None'
     });
 
     res.status(200).json({
@@ -258,8 +266,8 @@ export const logoutAdmin = (req, res) => {
   try {
     res.clearCookie('admin_token', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production', // Use secure in production
-      sameSite: 'Lax', // Adjust as per your frontend deployment
+      secure: process.env.NODE_ENV === 'production', // MUST be true if sameSite is 'None'
+      sameSite: 'None', // Changed from 'Lax' to 'None'
     });
 
     res.status(200).json({
