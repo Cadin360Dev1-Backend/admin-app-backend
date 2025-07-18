@@ -296,11 +296,18 @@ export const submitSamplePdfForm = async (req, res) => {
 /**
  * Controller function to handle sending a custom Thank You message.
  * This function is independent of form submissions and allows an admin
- * to send a customized email directly.
+ * to send a customized email directly. It now supports sending to a single
+ * email or an array of emails.
  *
  * Expected request body:
  * {
- * "toEmail": "recipient@example.com",
+ * "toEmails": "recipient@example.com", // Single email
+ * "subject": "Custom Thank You from My App",
+ * "message": "<p>Hello,</p><p>This is a <strong>custom</strong> thank you message!</p>"
+ * }
+ * OR
+ * {
+ * "toEmails": ["recipient1@example.com", "recipient2@example.com"], // Array of emails
  * "subject": "Custom Thank You from My App",
  * "message": "<p>Hello,</p><p>This is a <strong>custom</strong> thank you message!</p>"
  * }
@@ -309,21 +316,36 @@ export const handleThankYouSubmission = async (req, res) => {
   try {
     console.log("handleThankYouSubmission: Incoming request body:", req.body); // Debugging line
 
-    const { toEmail, subject, message } = req.body || {};
+    // Changed toEmails to accept string or array
+    const { toEmails, subject, message } = req.body || {};
 
-    // Basic validation for mandatory fields for sending a custom email
-    if (!toEmail || !subject || !message) {
+    // Basic validation for mandatory fields
+    if (!toEmails || toEmails.length === 0 || !subject || !message) {
       return res.status(400).json({
         statusCode: 400,
         success: false,
-        errors: [{ message: "Missing one or more mandatory fields (toEmail, subject, message)." }],
+        errors: [{ message: "Missing one or more mandatory fields (toEmails, subject, message)." }],
         message: "Missing required email parameters."
       });
     }
 
-    // Email format validation
+    // Validate email format(s)
     const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/;
-    if (!emailRegex.test(toEmail)) {
+    const validateEmail = (email) => emailRegex.test(email);
+
+    if (Array.isArray(toEmails)) {
+      // If it's an array, validate each email
+      const invalidEmails = toEmails.filter(email => !validateEmail(email));
+      if (invalidEmails.length > 0) {
+        return res.status(400).json({
+          statusCode: 400,
+          success: false,
+          errors: [{ message: `Invalid email format for: ${invalidEmails.join(', ')}` }],
+          message: "Invalid email format in array."
+        });
+      }
+    } else if (!validateEmail(toEmails)) {
+      // If it's a single string, validate it
       return res.status(400).json({
         statusCode: 400,
         success: false,
@@ -332,13 +354,13 @@ export const handleThankYouSubmission = async (req, res) => {
       });
     }
 
-    // Send the custom email
-    await sendEmail(toEmail, subject, message);
+    // Send the custom email(s)
+    await sendEmail(toEmails, subject, message);
 
     res.status(200).json({
       statusCode: 200,
       success: true,
-      message: "Custom thank you email sent successfully!",
+      message: Array.isArray(toEmails) ? `Custom thank you email sent successfully to ${toEmails.length} recipients!` : "Custom thank you email sent successfully!",
     });
 
   } catch (error) {
