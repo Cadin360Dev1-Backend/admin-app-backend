@@ -1,3 +1,4 @@
+// src/routes/form.route.js
 import express from 'express';
 import {
         fetchAllSubmissions,
@@ -5,8 +6,9 @@ import {
         fetchSampleSubmissions,
         submitForm,
         submitSamplePdfForm,
+        handleThankYouSubmission, // This was already imported
      }from '../controllers/form.controller.js';
-    
+
 const router = express.Router();
 
 // Define the route for submitting original form data (Bundle Form)
@@ -14,6 +16,9 @@ router.post('/submit', submitForm);
 
 // Define the new route for submitting sample PDF download form data
 router.post('/submit-sample-pdf', submitSamplePdfForm);
+
+// Define the new route for sending custom thank you messages
+router.post('/thankyou', handleThankYouSubmission); // This route was already added
 
 // Define the route for fetching all bundle form submissions
 router.get('/fetch-bundle-submissions', fetchBundleSubmissions);
@@ -25,5 +30,3 @@ router.get('/fetch-sample-submissions', fetchSampleSubmissions);
 router.get('/fetch-all-submissions', fetchAllSubmissions);
 
 export default router;
-
-

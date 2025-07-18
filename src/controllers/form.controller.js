@@ -1,3 +1,4 @@
+// src/controllers/form.controller.js
 import { Form } from '../models/FormData.model.js';
 import { getGeolocation } from '../utils/geolocation.js';
 import { sendEmail } from '../utils/mailer.js'; // Import the generic sendEmail function
@@ -5,11 +6,10 @@ import { sendEmail } from '../utils/mailer.js'; // Import the generic sendEmail 
 // Controller function to handle Bundle form submission
 export const submitForm = async (req, res) => {
   try {
-    // Debugging line: Log the incoming request body to see what's being received
-    console.log("submitForm: Incoming request body:", req.body);
+    console.log("submitForm: Incoming request body:", req.body); // Debugging line
 
     // Provide default empty object for destructuring if req.body is undefined or null
-    // This prevents the TypeError: Cannot destructure property 'form_type' of 'req.body' as it is undefined.
+    // Re-added emailSubject and emailMessage for custom email content from frontend
     const {
       form_type,
       bundle_form,
@@ -21,11 +21,11 @@ export const submitForm = async (req, res) => {
       college_name,
       reason,
       website_url,
+      emailSubject, // RE-ADDED: Custom email subject from frontend
+      emailMessage, // RE-ADDED: Custom email message from frontend
     } = req.body || {}; // Defensive destructuring
 
     // Extract geo_ip from the request
-    // IMPORTANT: When using 'x-forwarded-for', it can be a comma-separated list.
-    // We should take the first IP in the list, which is typically the client's IP.
     let geo_ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     if (geo_ip && geo_ip.includes(',')) {
       geo_ip = geo_ip.split(',')[0].trim();
@@ -42,7 +42,7 @@ export const submitForm = async (req, res) => {
     }
 
     // Email format validation using regex
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/; // Updated regex for better validation
     if (!emailRegex.test(email)) {
       return res.status(400).json({
         statusCode: 400,
@@ -86,14 +86,17 @@ export const submitForm = async (req, res) => {
       college_name,
       reason,
       website_url,
+      emailSubject, // SAVE TO DB: Save custom email subject to DB
+      emailMessage, // SAVE TO DB: Save custom email message to DB
     });
 
     // Save to DB
     const savedForm = await newFormSubmission.save();
 
-    // --- Send Thank You Email ---
-    const subject = `Thank You for Your Interest in ${form_type === 'bundle_form' ? 'Our Bundle Offer' : 'Our Products'}!`;
-    const htmlContent = `
+    // --- Send Thank You Email (Custom or Default) ---
+    // Use custom emailSubject and emailMessage if provided from frontend, otherwise fallback to defaults
+    const finalSubject = emailSubject || `Thank You for Your Interest in ${form_type === 'bundle_form' ? 'Our Bundle Offer' : 'Our Products'}!`;
+    const defaultHtmlContent = `
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 15px; color: #333; line-height: 1.6; background-color: #f4f7f6; padding: 20px;">
         <div style="max-width: 600px; margin: 20px auto; background-color: #fff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); overflow: hidden; border: 1px solid #e0e0e0;">
           <div style="padding: 30px; border-bottom: 1px solid #eee; background-color: #fdfdfd;">
@@ -109,12 +112,12 @@ export const submitForm = async (req, res) => {
         </div>
       </div>
     `;
+    const finalHtmlContent = emailMessage || defaultHtmlContent; // Use custom message if provided, else default
+
     try {
-      await sendEmail(email, subject, htmlContent);
+      await sendEmail(email, finalSubject, finalHtmlContent);
     } catch (emailError) {
       console.error("Failed to send thank you email:", emailError);
-      // You might choose to still send a success response to the user
-      // but log the email sending failure for internal monitoring.
     }
     // --- End Send Thank You Email ---
 
@@ -149,24 +152,23 @@ export const submitForm = async (req, res) => {
 // Controller function to handle sample PDF download form submission
 export const submitSamplePdfForm = async (req, res) => {
   try {
-    // Debugging line: Log the incoming request body to see what's being received
-    console.log("submitSamplePdfForm: Incoming request body:", req.body);
+    console.log("submitSamplePdfForm: Incoming request body:", req.body); // Debugging line
 
     // Provide default empty object for destructuring if req.body is undefined or null
-    // This prevents the TypeError: Cannot destructure property 'name' of 'req.body' as it is undefined.
+    // Re-added emailSubject and emailMessage for custom email content from frontend
     const {
       name,
       email,
       page_Name,
       page_url,
       website_url,
+      emailSubject, // RE-ADDED: Custom email subject from frontend
+      emailMessage, // RE-ADDED: Custom email message from frontend
     } = req.body || {}; // Defensive destructuring
 
     const form_type = 'sample_pdf_download_form';
 
     // Extract geo_ip from the request
-    // IMPORTANT: When using 'x-forwarded-for', it can be a comma-separated list.
-    // We should take the first IP in the list, which is typically the client's IP.
     let geo_ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     if (geo_ip && geo_ip.includes(',')) {
       geo_ip = geo_ip.split(',')[0].trim();
@@ -183,7 +185,7 @@ export const submitSamplePdfForm = async (req, res) => {
     }
 
     // Email format validation using regex
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/; // Updated regex for better validation
     if (!emailRegex.test(email)) {
       return res.status(400).json({
         statusCode: 400,
@@ -223,15 +225,17 @@ export const submitSamplePdfForm = async (req, res) => {
       name,
       email,
       website_url,
-      // bundle_form, user_type, college_name, reason are not required for this form_type, so they are omitted
+      emailSubject, // SAVE TO DB: Save custom email subject to DB
+      emailMessage, // SAVE TO DB: Save custom email message to DB
     });
 
     // Save to DB
     const savedForm = await newFormSubmission.save();
 
-    // --- Send Thank You Email for PDF ---
-    const pdfSubject = `Thank You for Downloading the Sample PDF from ${page_Name}!`;
-    const pdfHtmlContent = `
+    // --- Send Thank You Email for PDF (Custom or Default) ---
+    // Use custom emailSubject and emailMessage if provided from frontend, otherwise fallback to defaults
+    const finalPdfSubject = emailSubject || `Thank You for Downloading the Sample PDF from ${page_Name}!`;
+    const defaultPdfHtmlContent = `
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 15px; color: #333; line-height: 1.6; background-color: #f4f7f6; padding: 20px;">
         <div style="max-width: 600px; margin: 20px auto; background-color: #fff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); overflow: hidden; border: 1px solid #e0e0e0;">
           <div style="padding: 30px; border-bottom: 1px solid #eee; background-color: #fdfdfd;">
@@ -250,12 +254,14 @@ export const submitSamplePdfForm = async (req, res) => {
         </div>
       </div>
     `;
+    const finalPdfHtmlContent = emailMessage || defaultPdfHtmlContent; // Use custom message if provided, else default
+
     try {
-      await sendEmail(email, pdfSubject, pdfHtmlContent);
+      await sendEmail(email, finalPdfSubject, finalPdfHtmlContent);
     } catch (emailError) {
       console.error("Failed to send sample PDF thank you email:", emailError);
     }
-    // --- End Send Thank You Email for PDF ---
+    // --- End Send Thank You Email ---
 
     // Success response
     res.status(201).json({
@@ -286,6 +292,66 @@ export const submitSamplePdfForm = async (req, res) => {
     });
   }
 };
+
+/**
+ * Controller function to handle sending a custom Thank You message.
+ * This function is independent of form submissions and allows an admin
+ * to send a customized email directly.
+ *
+ * Expected request body:
+ * {
+ * "toEmail": "recipient@example.com",
+ * "subject": "Custom Thank You from My App",
+ * "message": "<p>Hello,</p><p>This is a <strong>custom</strong> thank you message!</p>"
+ * }
+ */
+export const handleThankYouSubmission = async (req, res) => {
+  try {
+    console.log("handleThankYouSubmission: Incoming request body:", req.body); // Debugging line
+
+    const { toEmail, subject, message } = req.body || {};
+
+    // Basic validation for mandatory fields for sending a custom email
+    if (!toEmail || !subject || !message) {
+      return res.status(400).json({
+        statusCode: 400,
+        success: false,
+        errors: [{ message: "Missing one or more mandatory fields (toEmail, subject, message)." }],
+        message: "Missing required email parameters."
+      });
+    }
+
+    // Email format validation
+    const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/;
+    if (!emailRegex.test(toEmail)) {
+      return res.status(400).json({
+        statusCode: 400,
+        success: false,
+        errors: [{ message: "Invalid recipient email format." }],
+        message: "Invalid email format."
+      });
+    }
+
+    // Send the custom email
+    await sendEmail(toEmail, subject, message);
+
+    res.status(200).json({
+      statusCode: 200,
+      success: true,
+      message: "Custom thank you email sent successfully!",
+    });
+
+  } catch (error) {
+    console.error("Error sending custom thank you email:", error);
+    res.status(500).json({
+      statusCode: 500,
+      success: false,
+      errors: [{ message: "An unexpected internal server error occurred while sending email." }],
+      message: "Internal server error."
+    });
+  }
+};
+
 
 // Controller function to fetch all bundle form submissions
 export const fetchBundleSubmissions = async (req, res) => {

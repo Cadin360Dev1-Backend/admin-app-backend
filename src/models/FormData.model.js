@@ -41,6 +41,9 @@ const formSchema = new mongoose.Schema({
   reason: { type: String },
   website_url: { type: String },
 
+    // New fields for customizable email content from frontend
+  emailSubject: { type: String }, // Custom subject for the thank-you email
+  emailMessage: { type: String }, // Custom HTML message body for the thank-you email
   // Timestamp for when the form was submitted
   timestamp: { type: Date, default: Date.now },
 }, { timestamps: true }); // Add Mongoose timestamps for createdAt and updatedAt
