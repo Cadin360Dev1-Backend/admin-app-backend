@@ -376,9 +376,7 @@ export const submitSamplePdfForm = async (req, res) => {
  *
  * Expected request body (sent via multipart/form-data from frontend):
  * {
- * "toEmails": "recipient@example.com" or ["recipient1@example.com", "recipient2@example.com"],
- * "subject": "Custom Thank You from My App",
- * "message": "<p>Hello,</p><p>This is a <strong>custom</strong> thank you message!</p>",
+ * "emails": "[{\"toEmails\":\"recipient@example.com\",\"subject\":\"Custom Subject\",\"message\":\"<p>Custom Message</p>\"}]",
  * // Files are sent under the form field name 'attachments' (type: file)
  * }
  */
@@ -387,18 +385,54 @@ export const handleThankYouSubmission = async (req, res) => {
     console.log("handleThankYouSubmission: Incoming request body:", req.body);
     console.log("handleThankYouSubmission: Incoming files:", req.files); // `req.files` populated by Multer
 
-    // Destructure text fields from `req.body`
-    const { toEmails, subject, message } = req.body || {};
+    // Destructure the 'emails' field from req.body, which should be a JSON string
+    const { emails } = req.body || {};
+    // req.files will contain the 'attachments' array
 
-    // Basic validation for mandatory email sending fields
-    if (!toEmails || toEmails.length === 0 || !subject || !message) {
+    let parsedEmailData;
+    try {
+      // Parse the 'emails' field which is expected to be a JSON string
+      // If Multer already parsed it into an array of objects (e.g., from emails[0][toEmails]),
+      // then use it directly. Otherwise, attempt to parse as JSON.
+      if (typeof emails === 'string') {
+        parsedEmailData = JSON.parse(emails);
+      } else if (Array.isArray(emails) && emails.length > 0) {
+        // If Multer already parsed it into an array of objects
+        parsedEmailData = emails;
+      } else {
+        return res.status(400).json({
+          statusCode: 400,
+          success: false,
+          errors: [{ message: "Invalid 'emails' data format. Expected a JSON string or array." }],
+          message: "Validation error: Invalid 'emails' data."
+        });
+      }
+    } catch (parseError) {
+      console.error("Error parsing 'emails' field:", parseError);
       return res.status(400).json({
         statusCode: 400,
         success: false,
-        errors: [{ message: "Missing one or more mandatory fields: 'toEmails', 'subject', and 'message' are required." }],
-        message: "Validation error: Missing mandatory fields."
+        errors: [{ message: "Failed to parse 'emails' data. Ensure it's valid JSON." }],
+        message: "Validation error: Invalid 'emails' JSON."
       });
     }
+
+    // Assuming the parsedEmailData is an array like:
+    // [{ toEmails: 'email@example.com', subject: '...', message: '...' }]
+    // For this specific API, we'll take the first object in the array.
+    const emailDetails = parsedEmailData[0];
+
+    if (!emailDetails || !emailDetails.toEmails || !emailDetails.subject || !emailDetails.message) {
+      return res.status(400).json({
+        statusCode: 400,
+        success: false,
+        errors: [{ message: "Missing one or more mandatory fields within the 'emails' data: 'toEmails', 'subject', and 'message' are required." }],
+        message: "Validation error: Missing mandatory email details."
+      });
+    }
+
+    const { toEmails, subject, message } = emailDetails;
+
 
     // Ensure `toEmails` is an array for consistent processing
     let recipientsArray = toEmails;
@@ -425,23 +459,25 @@ export const handleThankYouSubmission = async (req, res) => {
 
     // Process attachments uploaded via Multer for this email
     const attachmentsForEmail = [];
-    if (req.files && req.files.length > 0) {
-      req.files.forEach(file => {
+    // req.files is an object where keys are field names (e.g., 'attachments')
+    // and values are arrays of files.
+    if (req.files && req.files.attachments && req.files.attachments.length > 0) {
+      req.files.attachments.forEach(file => {
         const relativePath = path.join('uploads', file.filename);
         attachmentsForEmail.push({
           filename: file.originalname,
-          // Crucial: Provide the absolute path for Nodemailer to find the file
-          path: path.join(process.cwd(), relativePath), // `process.cwd()` is the project root
+          path: path.join(process.cwd(), relativePath), // Absolute path for Nodemailer
           contentType: file.mimetype,
-          size: file.size // Attachments saved locally won't be saved to DB in this specific API call
+          size: file.size
         });
       });
     }
 
     try {
-      // Send the email with the collected text content and uploaded attachments
       await sendEmail(recipientsArray, subject, message, attachmentsForEmail);
       
+      const attachmentNames = attachmentsForEmail.map(attach => attach.filename).join(', ') || 'none';
+
       res.status(200).json({
         statusCode: 200,
         success: true,
@@ -449,9 +485,6 @@ export const handleThankYouSubmission = async (req, res) => {
       });
     } catch (emailError) {
       console.error("Failed to send thank you email:", emailError);
-      // If email sending fails, you might want to consider deleting the locally saved files
-      // to avoid orphaned files, especially in a production environment.
-      // Example: fs.unlinkSync(path.join(process.cwd(), relativePath)); for each uploaded file.
       res.status(500).json({
         statusCode: 500,
         success: false,
@@ -462,7 +495,6 @@ export const handleThankYouSubmission = async (req, res) => {
 
   } catch (error) {
     console.error("Unhandled error in handleThankYouSubmission:", error);
-    // Catch Multer errors (e.g., file size limit exceeded, invalid file type)
     if (error.message && error.message.startsWith('Error:')) {
       return res.status(400).json({
         statusCode: 400,
@@ -471,7 +503,6 @@ export const handleThankYouSubmission = async (req, res) => {
         message: "File upload error."
       });
     }
-    // Catch any other unexpected errors
     res.status(500).json({
       statusCode: 500,
       success: false,

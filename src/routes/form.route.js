@@ -21,7 +21,12 @@ router.post('/submit-sample-pdf', upload.array('attachments', 10), submitSampleP
 
 // Define the new route for sending custom thank you messages
 // NOW accepts multipart/form-data for direct attachment uploads
-router.post('/thankyou', upload.array('attachments', 10), handleThankYouSubmission);
+// Use upload.fields to specify both file and text fields.
+// The 'emails' field will be a text field containing a JSON string or parsed object.
+router.post('/thankyou', upload.fields([
+  { name: 'attachments', maxCount: 10 }, // For file attachments
+  { name: 'emails' } // For the 'emails' text field (which contains JSON data)
+]), handleThankYouSubmission);
 
 // Define the route for fetching all bundle form submissions
 router.get('/fetch-bundle-submissions', fetchBundleSubmissions);
