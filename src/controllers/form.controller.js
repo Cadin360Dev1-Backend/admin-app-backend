@@ -392,11 +392,9 @@ export const handleThankYouSubmission = async (req, res) => {
     let parsedEmailData;
     try {
       // Parse the 'emails' field which is expected to be a JSON string
-      // If Multer already parsed it into an array of objects (e.g., from emails[0][toEmails]),
-      // then use it directly. Otherwise, attempt to parse as JSON.
       if (typeof emails === 'string') {
         parsedEmailData = JSON.parse(emails);
-      } else if (Array.isArray(emails) && emails.length > 0) {
+      } else if (Array.isArray(emails)) {
         // If Multer already parsed it into an array of objects
         parsedEmailData = emails;
       } else {
@@ -417,46 +415,6 @@ export const handleThankYouSubmission = async (req, res) => {
       });
     }
 
-    // Assuming the parsedEmailData is an array like:
-    // [{ toEmails: 'email@example.com', subject: '...', message: '...' }]
-    // For this specific API, we'll take the first object in the array.
-    const emailDetails = parsedEmailData[0];
-
-    if (!emailDetails || !emailDetails.toEmails || !emailDetails.subject || !emailDetails.message) {
-      return res.status(400).json({
-        statusCode: 400,
-        success: false,
-        errors: [{ message: "Missing one or more mandatory fields within the 'emails' data: 'toEmails', 'subject', and 'message' are required." }],
-        message: "Validation error: Missing mandatory email details."
-      });
-    }
-
-    const { toEmails, subject, message } = emailDetails;
-
-
-    // Ensure `toEmails` is an array for consistent processing
-    let recipientsArray = toEmails;
-    if (!Array.isArray(toEmails)) {
-      // If `toEmails` comes as a single string (e.g., "email1@a.com,email2@b.com"), split it
-      if (typeof toEmails === 'string' && toEmails.includes(',')) {
-        recipientsArray = toEmails.split(',').map(email => email.trim());
-      } else {
-        recipientsArray = [toEmails]; // Convert single string email to an array
-      }
-    }
-
-    // Validate email formats for all recipients
-    const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/;
-    const invalidEmailsInRequest = recipientsArray.filter(email => !emailRegex.test(email));
-    if (invalidEmailsInRequest.length > 0) {
-      return res.status(400).json({
-        statusCode: 400,
-        success: false,
-        errors: [{ message: `Invalid email format detected for: ${invalidEmailsInRequest.join(', ')}. Please provide valid email addresses.` }],
-        message: "Validation error: Invalid email format."
-      });
-    }
-
     // Process attachments uploaded via Multer for this email
     const attachmentsForEmail = [];
     // req.files is an object where keys are field names (e.g., 'attachments')
@@ -473,23 +431,73 @@ export const handleThankYouSubmission = async (req, res) => {
       });
     }
 
-    try {
-      await sendEmail(recipientsArray, subject, message, attachmentsForEmail);
-      
-      const attachmentNames = attachmentsForEmail.map(attach => attach.filename).join(', ') || 'none';
+    const sentEmailsInfo = [];
+    let allEmailsSentSuccessfully = true;
 
+    // Loop through each email object in the parsedEmailData array
+    for (const emailDetail of parsedEmailData) {
+      const { toEmails, subject, message } = emailDetail;
+
+      // Basic validation for mandatory email sending fields for each email
+      if (!toEmails || toEmails.length === 0 || !subject || !message) {
+        console.warn("Skipping email due to missing mandatory fields:", emailDetail);
+        allEmailsSentSuccessfully = false;
+        continue; // Skip to the next email if fields are missing
+      }
+
+      // Ensure `toEmails` is an array for consistent processing
+      let recipientsArray = toEmails;
+      if (!Array.isArray(toEmails)) {
+        if (typeof toEmails === 'string' && toEmails.includes(',')) {
+          recipientsArray = toEmails.split(',').map(email => email.trim());
+        } else {
+          recipientsArray = [toEmails];
+        }
+      }
+
+      // Validate email formats for all recipients
+      const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/;
+      const invalidEmailsInRequest = recipientsArray.filter(email => !emailRegex.test(email));
+      if (invalidEmailsInRequest.length > 0) {
+        console.warn(`Skipping email due to invalid email format for: ${invalidEmailsInRequest.join(', ')}`, emailDetail);
+        allEmailsSentSuccessfully = false;
+        continue; // Skip to the next email if invalid formats are found
+      }
+
+      try {
+        await sendEmail(recipientsArray, subject, message, attachmentsForEmail);
+        sentEmailsInfo.push({
+          recipients: recipientsArray,
+          subject: subject,
+          attachmentsCount: attachmentsForEmail.length,
+          status: 'success'
+        });
+      } catch (emailError) {
+        console.error(`Failed to send email to ${recipientsArray.join(', ')}:`, emailError);
+        sentEmailsInfo.push({
+          recipients: recipientsArray,
+          subject: subject,
+          attachmentsCount: attachmentsForEmail.length,
+          status: 'failed',
+          error: emailError.message
+        });
+        allEmailsSentSuccessfully = false;
+      }
+    }
+
+    if (allEmailsSentSuccessfully) {
       res.status(200).json({
         statusCode: 200,
         success: true,
-        message: `Thank you email sent successfully to ${recipientsArray.length} recipient(s) with ${attachmentsForEmail.length} attachment(s)!`,
+        message: `All specified emails sent successfully!`,
+        sentEmails: sentEmailsInfo
       });
-    } catch (emailError) {
-      console.error("Failed to send thank you email:", emailError);
-      res.status(500).json({
-        statusCode: 500,
-        success: false,
-        errors: [{ message: "Failed to send email due to a server error. Please check server logs." }],
-        message: "Email sending failed."
+    } else {
+      res.status(207).json({ // 207 Multi-Status if some succeeded and some failed
+        statusCode: 207,
+        success: false, // Indicate partial success or failure
+        message: `Some emails failed to send. Check 'sentEmails' for details.`,
+        sentEmails: sentEmailsInfo
       });
     }
 
