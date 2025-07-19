@@ -32,6 +32,25 @@ const templateSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+   // Attachments array, now with optional fields for each attachment
+  attachments: [{
+    filename: {
+      type: String,
+      // required: true, // Removed, now optional
+    },
+    path: { // Relative path where the file is stored on the server
+      type: String,
+      // required: true, // Removed, now optional
+    },
+    contentType: {
+      type: String,
+      // required: true, // Removed, now optional
+    },
+    size: {
+      type: Number, // Size in bytes
+      // required: true, // Removed, now optional
+    }
+  }],
 }, {
   timestamps: true // Adds createdAt and updatedAt timestamps automatically
 });

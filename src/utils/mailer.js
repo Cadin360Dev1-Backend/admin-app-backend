@@ -69,28 +69,30 @@ export const sendOtpEmail = async (toEmail, otp, requestingEmail = toEmail) => {
 
 /**
  * Sends a generic email to a specified recipient(s).
- * @param {string | string[]} toEmails - The email address(es) of the recipient(s). Can be a single string or an array of strings.
+ * @param {string | string[]} toEmails - The email address(es) of the recipient(s).
  * @param {string} subject - The subject line of the email.
  * @param {string} htmlContent - The HTML body of the email.
+ * @param {object[]} [attachments=[]] - Optional: An array of attachment objects for Nodemailer.
  * @returns {Promise<void>} A promise that resolves if the email is sent successfully,
  * or rejects with an error if sending fails.
  */
-export const sendEmail = async (toEmails, subject, htmlContent) => {
+export const sendEmail = async (toEmails, subject, htmlContent, attachments = []) => {
   const mailOptions = {
     from: process.env.EMAIL_USERNAME, // Sender address
-    to: toEmails,                     // Recipient(s) address(es) - Nodemailer accepts string or array
+    to: toEmails,                     // Recipient address(es)
     subject: subject,                 // Subject line from parameters
     html: htmlContent,                // HTML body from parameters
+    attachments: attachments,         // Attachments from parameters
   };
 
   try {
     await transporter.sendMail(mailOptions);
-    // Log based on whether it was a single or bulk send
-    if (Array.isArray(toEmails)) {
-      console.log(`Email successfully sent to ${toEmails.length} recipients with subject: "${subject}"`);
-    } else {
-      console.log(`Email successfully sent to ${toEmails} with subject: "${subject}"`);
+    let logMessage = `Email successfully sent to ${Array.isArray(toEmails) ? toEmails.join(', ') : toEmails}`;
+    if (attachments && attachments.length > 0) {
+      logMessage += ` with ${attachments.length} attachment(s)`;
     }
+    logMessage += ` with subject: "${subject}"`;
+    console.log(logMessage);
   } catch (error) {
     console.error(`Error sending generic email to ${toEmails} with subject "${subject}":`, error);
     throw error; // Re-throw to be caught by the caller

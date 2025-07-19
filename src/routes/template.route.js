@@ -6,7 +6,9 @@ import {
   getTemplateById,
   updateTemplate,
   deleteTemplate,
+  sendEmailFromTemplate
 } from '../controllers/template.controller.js';
+import upload from '../config/multerConfig.js'; // Import Multer upload middleware
 
 const router = express.Router();
 
@@ -24,5 +26,10 @@ router.put('/:id', updateTemplate);
 
 // DELETE a template by ID
 router.delete('/:id', deleteTemplate);
+
+
+// NEW ROUTE: Send an email using a template with optional attachments
+// This route will use Multer to process 'attachments' field (up to 10 files)
+router.post('/send-email', upload.array('attachments', 10), sendEmailFromTemplate);
 
 export default router;

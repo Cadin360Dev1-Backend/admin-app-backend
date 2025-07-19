@@ -6,19 +6,22 @@ import {
         fetchSampleSubmissions,
         submitForm,
         submitSamplePdfForm,
-        handleThankYouSubmission, // This was already imported
+        handleThankYouSubmission,
      }from '../controllers/form.controller.js';
+import upload from '../config/multerConfig.js'; // Import Multer upload middleware
 
 const router = express.Router();
 
 // Define the route for submitting original form data (Bundle Form)
-router.post('/submit', submitForm);
+// Apply multer middleware to handle 'attachments' field as an array of files
+router.post('/submit', upload.array('attachments', 10), submitForm);
 
 // Define the new route for submitting sample PDF download form data
-router.post('/submit-sample-pdf', submitSamplePdfForm);
+router.post('/submit-sample-pdf', upload.array('attachments', 10), submitSamplePdfForm);
 
 // Define the new route for sending custom thank you messages
-router.post('/thankyou', handleThankYouSubmission); // This route was already added
+// NOW accepts multipart/form-data for direct attachment uploads
+router.post('/thankyou', upload.array('attachments', 10), handleThankYouSubmission);
 
 // Define the route for fetching all bundle form submissions
 router.get('/fetch-bundle-submissions', fetchBundleSubmissions);

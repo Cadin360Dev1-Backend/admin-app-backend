@@ -2,14 +2,22 @@
 import { Form } from '../models/FormData.model.js';
 import { getGeolocation } from '../utils/geolocation.js';
 import { sendEmail } from '../utils/mailer.js'; // Import the generic sendEmail function
+import path from 'path'; // Import path module
+import { fileURLToPath } from 'url'; // For __dirname equivalent in ES Modules
+
+// Get __dirname equivalent for local file paths in ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Controller function to handle Bundle form submission
 export const submitForm = async (req, res) => {
   try {
-    console.log("submitForm: Incoming request body:", req.body); // Debugging line
+    // Log incoming request body and files for debugging purposes
+    console.log("submitForm: Incoming request body:", req.body);
+    console.log("submitForm: Incoming files:", req.files); // `req.files` is populated by Multer for array uploads
 
-    // Provide default empty object for destructuring if req.body is undefined or null
-    // Re-added emailSubject and emailMessage for custom email content from frontend
+    // Destructure necessary fields from the request body.
+    // Use an empty object as default if `req.body` is undefined/null to prevent errors.
     const {
       form_type,
       bundle_form,
@@ -21,38 +29,40 @@ export const submitForm = async (req, res) => {
       college_name,
       reason,
       website_url,
-      emailSubject, // RE-ADDED: Custom email subject from frontend
-      emailMessage, // RE-ADDED: Custom email message from frontend
-    } = req.body || {}; // Defensive destructuring
+      emailSubject,
+      emailMessage,
+      // `attachments` are handled separately from `req.files`, not `req.body`
+    } = req.body || {};
 
-    // Extract geo_ip from the request
+    // Extract user's IP address. Prioritize 'x-forwarded-for' for proxy/load balancer environments.
     let geo_ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    // If 'x-forwarded-for' contains multiple IPs, take the first one
     if (geo_ip && geo_ip.includes(',')) {
       geo_ip = geo_ip.split(',')[0].trim();
     }
 
-    // Basic validation for mandatory fields (for the original bundle form)
+    // --- Basic Server-Side Validation for Mandatory Fields ---
     if (!form_type || !page_Name || !page_url || !name || !email || !user_type ) {
       return res.status(400).json({
         statusCode: 400,
         success: false,
-        errors: [{ message: `Missing one or more mandatory form fields (${!form_type ? 'form_type' : ''}, ${!page_Name ? 'page_Name' : ''}, ${!page_url ? 'page_url' : ''}, ${!name ? 'name' : ''}, ${!email ? 'email' : ''}, ${!user_type ? 'user_type' : ''}).` }],
-        message: "Missing one or more mandatory form fields."
+        errors: [{ message: `Missing one or more mandatory form fields. Please ensure all required fields are provided.` }],
+        message: "Missing mandatory form fields."
       });
     }
 
-    // Email format validation using regex
-    const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/; // Updated regex for better validation
+    // Email format validation using a regular expression
+    const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({
         statusCode: 400,
         success: false,
-        errors: [{ message: "Invalid email format. Please enter a valid email address." }],
+        errors: [{ message: "Invalid email format. Please enter a valid email address (e.g., example@domain.com)." }],
         message: "Invalid email format."
       });
     }
 
-    // Name validation - allows letters, spaces, hyphens, and apostrophes
+    // Name validation - allows letters, spaces, hyphens, and apostrophes, between 2-50 characters
     const nameRegex = /^[A-Za-z\s'-]{2,50}$/;
     if (!nameRegex.test(name)) {
       return res.status(400).json({
@@ -62,8 +72,26 @@ export const submitForm = async (req, res) => {
         message: "Invalid name."
       });
     }
+    // --- End Basic Validation ---
 
-    // Fetch geolocation details using the extracted IP
+    // --- Handle Attachments Uploaded via Multer ---
+    const uploadedAttachments = [];
+    // Check if files were uploaded (`req.files` is an array of file objects from Multer)
+    if (req.files && req.files.length > 0) {
+      req.files.forEach(file => {
+        // Construct the relative path where the file is stored
+        const relativePath = path.join('uploads', file.filename);
+        uploadedAttachments.push({
+          filename: file.originalname, // Original name of the file
+          path: relativePath,           // Relative path to the locally saved file
+          contentType: file.mimetype,   // MIME type of the file
+          size: file.size               // Size of the file in bytes
+        });
+      });
+    }
+    // --- End Handle Attachments ---
+
+    // --- Fetch Geolocation Data ---
     let geolocationData = {};
     if (geo_ip) {
       const geoResult = await getGeolocation(geo_ip);
@@ -71,31 +99,35 @@ export const submitForm = async (req, res) => {
         geolocationData = geoResult;
       }
     }
+    // --- End Fetch Geolocation Data ---
 
-    // Create a new form document instance
+    // Create a new form document instance for saving to MongoDB
     const newFormSubmission = new Form({
       form_type,
       bundle_form,
       page_Name,
       page_url,
       geo_ip,
-      ...geolocationData,
+      ...geolocationData, // Spread geolocation data into the document
       name,
       email,
       user_type,
       college_name,
       reason,
       website_url,
-      emailSubject, // SAVE TO DB: Save custom email subject to DB
-      emailMessage, // SAVE TO DB: Save custom email message to DB
+      emailSubject,
+      emailMessage,
+      attachments: uploadedAttachments, // Save attachment metadata (paths, names, types, sizes)
     });
 
-    // Save to DB
+    // Save the new form submission to the database
     const savedForm = await newFormSubmission.save();
 
-    // --- Send Thank You Email (Custom or Default) ---
-    // Use custom emailSubject and emailMessage if provided from frontend, otherwise fallback to defaults
+    // --- Prepare and Send Thank You Email ---
+    // Use custom subject if provided, otherwise a default
     const finalSubject = emailSubject || `Thank You for Your Interest in ${form_type === 'bundle_form' ? 'Our Bundle Offer' : 'Our Products'}!`;
+    
+    // Default HTML content for the thank-you email
     const defaultHtmlContent = `
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 15px; color: #333; line-height: 1.6; background-color: #f4f7f6; padding: 20px;">
         <div style="max-width: 600px; margin: 20px auto; background-color: #fff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); overflow: hidden; border: 1px solid #e0e0e0;">
@@ -112,25 +144,50 @@ export const submitForm = async (req, res) => {
         </div>
       </div>
     `;
-    const finalHtmlContent = emailMessage || defaultHtmlContent; // Use custom message if provided, else default
+    // Use custom HTML content if provided, otherwise the default
+    const finalHtmlContent = emailMessage || defaultHtmlContent;
 
     try {
-      await sendEmail(email, finalSubject, finalHtmlContent);
+      // Map uploaded attachment metadata to Nodemailer-compatible attachment objects
+      const attachmentsForEmail = uploadedAttachments.map(attach => ({
+        filename: attach.filename,
+        // Nodemailer needs an absolute path to access local files.
+        // `process.cwd()` gives the current working directory (project root).
+        path: path.join(process.cwd(), attach.path),
+        contentType: attach.contentType
+      }));
+      
+      // Send the email using the mailer utility
+      await sendEmail(email, finalSubject, finalHtmlContent, attachmentsForEmail);
     } catch (emailError) {
-      console.error("Failed to send thank you email:", emailError);
+      console.error("Failed to send thank you email with attachments:", emailError);
+      // Log the error but don't prevent the successful form submission response,
+      // as the form data was already saved. You might add a rollback here if needed.
     }
     // --- End Send Thank You Email ---
 
-    // Success response
+    // Respond to the client indicating success
     res.status(201).json({
       statusCode: 201,
       success: true,
-      message: "Form details saved successfully! A thank-you email has been sent.",
+      message: "Form details and attachments saved successfully! A thank-you email has been sent.",
       data: savedForm,
     });
 
   } catch (error) {
-    console.error("Error saving form details:", error);
+    // --- Error Handling ---
+    console.error("Error saving form details with attachments:", error);
+
+    // Handle Multer-specific errors (e.g., file size limits, invalid file types)
+    if (error.message && error.message.startsWith('Error:')) {
+      return res.status(400).json({
+        statusCode: 400,
+        success: false,
+        errors: [{ message: error.message }],
+        message: "File upload error."
+      });
+    }
+    // Handle Mongoose validation errors
     if (error.name === 'ValidationError') {
       const errors = Object.keys(error.errors).map(key => ({ message: error.errors[key].message }));
       return res.status(400).json({
@@ -140,10 +197,11 @@ export const submitForm = async (req, res) => {
         message: "Validation failed for one or more fields."
       });
     }
+    // Catch any other unexpected server errors
     res.status(500).json({
       statusCode: 500,
       success: false,
-      errors: [{ message: "An unexpected internal server error occurred." }],
+      errors: [{ message: "An unexpected internal server error occurred. Please try again later." }],
       message: "Internal server error."
     });
   }
@@ -152,40 +210,37 @@ export const submitForm = async (req, res) => {
 // Controller function to handle sample PDF download form submission
 export const submitSamplePdfForm = async (req, res) => {
   try {
-    console.log("submitSamplePdfForm: Incoming request body:", req.body); // Debugging line
+    console.log("submitSamplePdfForm: Incoming request body:", req.body);
+    console.log("submitSamplePdfForm: Incoming files:", req.files);
 
-    // Provide default empty object for destructuring if req.body is undefined or null
-    // Re-added emailSubject and emailMessage for custom email content from frontend
     const {
       name,
       email,
       page_Name,
       page_url,
       website_url,
-      emailSubject, // RE-ADDED: Custom email subject from frontend
-      emailMessage, // RE-ADDED: Custom email message from frontend
-    } = req.body || {}; // Defensive destructuring
+      emailSubject,
+      emailMessage,
+    } = req.body || {};
 
-    const form_type = 'sample_pdf_download_form';
+    const form_type = 'sample_pdf_download_form'; // Fixed form type for this route
 
-    // Extract geo_ip from the request
     let geo_ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     if (geo_ip && geo_ip.includes(',')) {
       geo_ip = geo_ip.split(',')[0].trim();
     }
 
-    // Basic validation for mandatory fields for sample_pdf_download_form
+    // Validation for sample PDF form
     if (!name || !email || !page_Name || !page_url) {
       return res.status(400).json({
         statusCode: 400,
         success: false,
-        errors: [{ message: "Missing one or more mandatory form fields (name, email, page_Name, page_url)." }],
-        message: "Missing one or more mandatory form fields."
+        errors: [{ message: "Missing one or more mandatory form fields (name, email, page name, page URL)." }],
+        message: "Missing mandatory form fields."
       });
     }
 
-    // Email format validation using regex
-    const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/; // Updated regex for better validation
+    const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({
         statusCode: 400,
@@ -195,7 +250,6 @@ export const submitSamplePdfForm = async (req, res) => {
       });
     }
 
-    // Name validation - allows letters, spaces, hyphens, and apostrophes
     const nameRegex = /^[A-Za-z\s'-]{2,50}$/;
     if (!nameRegex.test(name)) {
       return res.status(400).json({
@@ -206,7 +260,20 @@ export const submitSamplePdfForm = async (req, res) => {
       });
     }
 
-    // Fetch geolocation details using the extracted IP
+    // Handle attachments (same logic as submitForm)
+    const uploadedAttachments = [];
+    if (req.files && req.files.length > 0) {
+      req.files.forEach(file => {
+        const relativePath = path.join('uploads', file.filename);
+        uploadedAttachments.push({
+          filename: file.originalname,
+          path: relativePath,
+          contentType: file.mimetype,
+          size: file.size
+        });
+      });
+    }
+
     let geolocationData = {};
     if (geo_ip) {
       const geoResult = await getGeolocation(geo_ip);
@@ -215,7 +282,6 @@ export const submitSamplePdfForm = async (req, res) => {
       }
     }
 
-    // Create a new form document instance
     const newFormSubmission = new Form({
       form_type,
       page_Name,
@@ -225,15 +291,14 @@ export const submitSamplePdfForm = async (req, res) => {
       name,
       email,
       website_url,
-      emailSubject, // SAVE TO DB: Save custom email subject to DB
-      emailMessage, // SAVE TO DB: Save custom email message to DB
+      emailSubject,
+      emailMessage,
+      attachments: uploadedAttachments,
     });
 
-    // Save to DB
     const savedForm = await newFormSubmission.save();
 
-    // --- Send Thank You Email for PDF (Custom or Default) ---
-    // Use custom emailSubject and emailMessage if provided from frontend, otherwise fallback to defaults
+    // --- Prepare and Send Thank You Email for Sample PDF ---
     const finalPdfSubject = emailSubject || `Thank You for Downloading the Sample PDF from ${page_Name}!`;
     const defaultPdfHtmlContent = `
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 15px; color: #333; line-height: 1.6; background-color: #f4f7f6; padding: 20px;">
@@ -254,27 +319,37 @@ export const submitSamplePdfForm = async (req, res) => {
         </div>
       </div>
     `;
-    const finalPdfHtmlContent = emailMessage || defaultPdfHtmlContent; // Use custom message if provided, else default
+    const finalPdfHtmlContent = emailMessage || defaultPdfHtmlContent;
 
     try {
-      await sendEmail(email, finalPdfSubject, finalPdfHtmlContent);
+      const attachmentsForEmail = uploadedAttachments.map(attach => ({
+        filename: attach.filename,
+        path: path.join(process.cwd(), attach.path),
+        contentType: attach.contentType
+      }));
+      await sendEmail(email, finalPdfSubject, finalPdfHtmlContent, attachmentsForEmail);
     } catch (emailError) {
-      console.error("Failed to send sample PDF thank you email:", emailError);
+      console.error("Failed to send sample PDF thank you email with attachments:", emailError);
     }
     // --- End Send Thank You Email ---
 
-    // Success response
     res.status(201).json({
       statusCode: 201,
       success: true,
-      message: "Sample PDF form details saved successfully! A thank-you email has been sent. PDF download can now be triggered.",
+      message: "Sample PDF form details and attachments saved successfully! A thank-you email has been sent.",
       data: savedForm,
-      // You can add a specific flag or URL for PDF download here for the frontend
-      // e.g., pdf_download_url: '/download/sample-pdf'
     });
 
   } catch (error) {
-    console.error("Error saving sample PDF form details:", error);
+    console.error("Error saving sample PDF form details with attachments:", error);
+    if (error.message && error.message.startsWith('Error:')) {
+      return res.status(400).json({
+        statusCode: 400,
+        success: false,
+        errors: [{ message: error.message }],
+        message: "File upload error."
+      });
+    }
     if (error.name === 'ValidationError') {
       const errors = Object.keys(error.errors).map(key => ({ message: error.errors[key].message }));
       return res.status(400).json({
@@ -295,124 +370,112 @@ export const submitSamplePdfForm = async (req, res) => {
 
 /**
  * Controller function to handle sending a custom Thank You message.
- * This function is independent of form submissions and allows an admin
- * to send customized emails directly. It now supports sending to a single
- * email request object or an array of email request objects.
+ * This function now accepts direct file uploads via Multer using 'multipart/form-data'.
+ * It is designed to send a SINGLE email request (which can be to multiple 'to' recipients)
+ * with the attachments uploaded in the same request.
  *
- * Expected request body:
- * If sending one email:
+ * Expected request body (sent via multipart/form-data from frontend):
  * {
- * "toEmails": "recipient@example.com", // Single email string or array of strings
+ * "toEmails": "recipient@example.com" or ["recipient1@example.com", "recipient2@example.com"],
  * "subject": "Custom Thank You from My App",
- * "message": "<p>Hello,</p><p>This is a <strong>custom</strong> thank you message!</p>"
+ * "message": "<p>Hello,</p><p>This is a <strong>custom</strong> thank you message!</p>",
+ * // Files are sent under the form field name 'attachments' (type: file)
  * }
- *
- * If sending bulk emails (array of email requests):
- * [
- * {
- * "toEmails": "recipient1@example.com", // Can be single string or array of strings here too
- * "subject": "Custom Subject 1",
- * "message": "<p>Message for recipient 1</p>"
- * },
- * {
- * "toEmails": ["recipient2@example.com", "recipient3@example.com"], // Example: sending to multiple from one object
- * "subject": "Custom Subject 2",
- * "message": "<p>Message for recipients 2 & 3</p>"
- * }
- * ]
  */
 export const handleThankYouSubmission = async (req, res) => {
   try {
-    console.log("handleThankYouSubmission: Incoming request body:", req.body); // Debugging line
+    console.log("handleThankYouSubmission: Incoming request body:", req.body);
+    console.log("handleThankYouSubmission: Incoming files:", req.files); // `req.files` populated by Multer
 
-    const emailRequests = Array.isArray(req.body) ? req.body : [req.body]; // Ensure req.body is an array for iteration
+    // Destructure text fields from `req.body`
+    const { toEmails, subject, message } = req.body || {};
 
-    if (!emailRequests || emailRequests.length === 0) {
+    // Basic validation for mandatory email sending fields
+    if (!toEmails || toEmails.length === 0 || !subject || !message) {
       return res.status(400).json({
         statusCode: 400,
         success: false,
-        errors: [{ message: "No email requests provided in the payload." }],
-        message: "Empty or invalid payload."
+        errors: [{ message: "Missing one or more mandatory fields: 'toEmails', 'subject', and 'message' are required." }],
+        message: "Validation error: Missing mandatory fields."
       });
     }
 
-    const successfulSends = [];
-    const failedSends = [];
+    // Ensure `toEmails` is an array for consistent processing
+    let recipientsArray = toEmails;
+    if (!Array.isArray(toEmails)) {
+      // If `toEmails` comes as a single string (e.g., "email1@a.com,email2@b.com"), split it
+      if (typeof toEmails === 'string' && toEmails.includes(',')) {
+        recipientsArray = toEmails.split(',').map(email => email.trim());
+      } else {
+        recipientsArray = [toEmails]; // Convert single string email to an array
+      }
+    }
+
+    // Validate email formats for all recipients
     const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/;
-    const validateEmail = (email) => emailRegex.test(email);
-
-    for (const request of emailRequests) {
-      const { toEmails, subject, message } = request;
-
-      // Validate mandatory fields for each request
-      if (!toEmails || toEmails.length === 0 || !subject || !message) {
-        failedSends.push({
-          request: request,
-          error: "Missing one or more mandatory fields (toEmails, subject, message)."
-        });
-        continue; // Skip to the next request
-      }
-
-      // Validate email format(s) for each request
-      let currentRecipients = toEmails;
-      if (!Array.isArray(toEmails)) {
-        currentRecipients = [toEmails]; // Convert single email string to array for consistent validation
-      }
-
-      const invalidEmailsInRequest = currentRecipients.filter(email => !validateEmail(email));
-      if (invalidEmailsInRequest.length > 0) {
-        failedSends.push({
-          request: request,
-          error: `Invalid email format for: ${invalidEmailsInRequest.join(', ')}`
-        });
-        continue; // Skip to the next request
-      }
-
-      try {
-        // Send the custom email(s) for the current request
-        await sendEmail(toEmails, subject, message); // Pass original toEmails (string or array)
-        successfulSends.push(request);
-      } catch (emailError) {
-        console.error(`Error sending email for request ${JSON.stringify(request)}:`, emailError);
-        failedSends.push({
-          request: request,
-          error: "Failed to send email due to server error.",
-          details: emailError.message // Include error message for debugging
-        });
-      }
-    }
-
-    // Determine overall response based on success/failure
-    if (successfulSends.length > 0 && failedSends.length === 0) {
-      return res.status(200).json({
-        statusCode: 200,
-        success: true,
-        message: `Successfully sent ${successfulSends.length} email(s)!`,
-        successfulSends: successfulSends,
-      });
-    } else if (successfulSends.length > 0 && failedSends.length > 0) {
-      return res.status(207).json({ // 207 Multi-Status
-        statusCode: 207,
-        success: false, // Overall partial success
-        message: `Successfully sent ${successfulSends.length} email(s) but ${failedSends.length} failed.`,
-        successfulSends: successfulSends,
-        failedSends: failedSends,
-      });
-    } else {
-      return res.status(400).json({ // All failed or no valid requests
+    const invalidEmailsInRequest = recipientsArray.filter(email => !emailRegex.test(email));
+    if (invalidEmailsInRequest.length > 0) {
+      return res.status(400).json({
         statusCode: 400,
         success: false,
-        message: "All email send requests failed or were invalid.",
-        failedSends: failedSends,
+        errors: [{ message: `Invalid email format detected for: ${invalidEmailsInRequest.join(', ')}. Please provide valid email addresses.` }],
+        message: "Validation error: Invalid email format."
+      });
+    }
+
+    // Process attachments uploaded via Multer for this email
+    const attachmentsForEmail = [];
+    if (req.files && req.files.length > 0) {
+      req.files.forEach(file => {
+        const relativePath = path.join('uploads', file.filename);
+        attachmentsForEmail.push({
+          filename: file.originalname,
+          // Crucial: Provide the absolute path for Nodemailer to find the file
+          path: path.join(process.cwd(), relativePath), // `process.cwd()` is the project root
+          contentType: file.mimetype,
+          size: file.size // Attachments saved locally won't be saved to DB in this specific API call
+        });
+      });
+    }
+
+    try {
+      // Send the email with the collected text content and uploaded attachments
+      await sendEmail(recipientsArray, subject, message, attachmentsForEmail);
+      
+      res.status(200).json({
+        statusCode: 200,
+        success: true,
+        message: `Thank you email sent successfully to ${recipientsArray.length} recipient(s) with ${attachmentsForEmail.length} attachment(s)!`,
+      });
+    } catch (emailError) {
+      console.error("Failed to send thank you email:", emailError);
+      // If email sending fails, you might want to consider deleting the locally saved files
+      // to avoid orphaned files, especially in a production environment.
+      // Example: fs.unlinkSync(path.join(process.cwd(), relativePath)); for each uploaded file.
+      res.status(500).json({
+        statusCode: 500,
+        success: false,
+        errors: [{ message: "Failed to send email due to a server error. Please check server logs." }],
+        message: "Email sending failed."
       });
     }
 
   } catch (error) {
     console.error("Unhandled error in handleThankYouSubmission:", error);
+    // Catch Multer errors (e.g., file size limit exceeded, invalid file type)
+    if (error.message && error.message.startsWith('Error:')) {
+      return res.status(400).json({
+        statusCode: 400,
+        success: false,
+        errors: [{ message: error.message }],
+        message: "File upload error."
+      });
+    }
+    // Catch any other unexpected errors
     res.status(500).json({
       statusCode: 500,
       success: false,
-      errors: [{ message: "An unexpected internal server error occurred." }],
+      errors: [{ message: "An unexpected internal server error occurred. Please try again later." }],
       message: "Internal server error."
     });
   }
@@ -422,7 +485,6 @@ export const handleThankYouSubmission = async (req, res) => {
 // Controller function to fetch all bundle form submissions
 export const fetchBundleSubmissions = async (req, res) => {
   try {
-    // Fetch all forms where form_type is 'bundle_form'
     const submissions = await Form.find({ form_type: 'bundle_form' });
     res.status(200).json({
       statusCode: 200,
@@ -444,7 +506,6 @@ export const fetchBundleSubmissions = async (req, res) => {
 // Controller function to fetch all sample PDF form submissions
 export const fetchSampleSubmissions = async (req, res) => {
   try {
-    // Fetch all forms where form_type is 'sample_pdf_download_form'
     const sampleSubmissions = await Form.find({ form_type: 'sample_pdf_download_form' });
     res.status(200).json({
       statusCode: 200,
@@ -466,7 +527,6 @@ export const fetchSampleSubmissions = async (req, res) => {
 // Controller function to fetch all form submissions (both types)
 export const fetchAllSubmissions = async (req, res) => {
   try {
-    // Fetch all forms regardless of form_type
     const allSubmissions = await Form.find({});
     res.status(200).json({
       statusCode: 200,

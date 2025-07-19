@@ -44,6 +44,18 @@ const formSchema = new mongoose.Schema({
     // New fields for customizable email content from frontend
   emailSubject: { type: String }, // Custom subject for the thank-you email
   emailMessage: { type: String }, // Custom HTML message body for the thank-you email
+
+  // NEW: Optional array of attachments for form submissions
+  attachments: [
+    {
+      filename: { type: String, required: true },
+      path: { type: String }, // Path to the file if stored on server/cloud
+      content: { type: String }, // Base64 encoded string of the file content (if stored directly)
+      contentType: { type: String }, // Mime type, e.g., 'application/pdf', 'image/jpeg'
+      // Consider adding file size, upload date, etc., if needed
+    }
+  ],
+
   // Timestamp for when the form was submitted
   timestamp: { type: Date, default: Date.now },
 }, { timestamps: true }); // Add Mongoose timestamps for createdAt and updatedAt
