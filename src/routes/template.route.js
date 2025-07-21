@@ -19,15 +19,12 @@ router.get('/', getAllTemplates);
 router.get('/:id', getTemplateById);
 
 // POST a new template
-// Use upload.fields to handle both text fields and an array of attachments
+// Use upload.fields to handle 'emails' as a text field and 'attachments' as files
 router.post('/', upload.fields([
-    { name: 'templateName', maxCount: 1 },
-    { name: 'subject', maxCount: 1 },
-    { name: 'htmlContent', maxCount: 1 },
-    { name: 'type', maxCount: 1 }, // Optional field
-    { name: 'description', maxCount: 1 }, // Optional field
-    { name: 'attachments', maxCount: 10 } // Array of files
-]), addTemplate)
+    { name: 'emails', maxCount: 1 },         // Expect 'emails' as a single text field (the JSON string)
+    { name: 'attachments', maxCount: 10 }    // Expect 'attachments' as up to 10 files
+]), addTemplate);
+
 
 // PUT (update) an existing template by ID
 router.put('/:id', upload.array('attachments', 10), updateTemplate); // Also use for update if attachments can be updated

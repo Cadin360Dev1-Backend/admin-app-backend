@@ -77,52 +77,75 @@ export const getTemplateById = async (req, res) => {
 };
 
 /**
- * Controller function to add a new email template.
- * POST /api/templates
- * Expected body: { templateName, subject, htmlContent, type (optional), description (optional), attachments (optional, these are file uploads) }
+ Expected Form Fields:
+ * - `emails`: A stringified JSON object containing the template's text data.
+ * Example `emails` content:
+ * `{
+ * "templateName": "Your Template Name",
+ * "subject": "Email Subject Line",
+ * "htmlContent": "<html>...</html>",
+ * "type": "thank_you",      // Optional
+ * "description": "A brief description" // Optional
+ * }`
+ * - `attachments`: (Optional) One or more binary files. These are actual file uploads.
+ * The `attachments` array within the `emails` JSON string is treated as metadata
+ * or a placeholder, and the actual files are processed from the `attachments` form field.
  */
 export const addTemplate = async (req, res) => {
   try {
-    // For text fields from multipart/form-data, they are directly in req.body
-    const { templateName, subject, htmlContent, type, description } = req.body; //
-
-    // If you are expecting files, they will be in req.files
-    const uploadedFiles = req.files && req.files.attachments ? req.files.attachments : []; //
-
-    // // Basic validation for text fields
-    // if (!templateName || !subject || !htmlContent) { //
-    //   return res.status(400).json({ //
-    //     statusCode: 400, //
-    //     success: false, //
-    //     errors: [{ message: "Missing mandatory fields: templateName, subject, and htmlContent are required." }], //
-    //     message: "Validation error." //
-    //   });
-    // }
-
-    // Dynamic validation for missing fields
-      const missingFields = [];
-      if (!templateName) missingFields.push("templateName");
-      if (!subject) missingFields.push("subject");
-      if (!htmlContent) missingFields.push("htmlContent");
-
-      if (missingFields.length > 0) {
+    let templateData;
+    // The 'emails' field will be a string in req.body
+    if (req.body.emails) {
+      try {
+        templateData = JSON.parse(req.body.emails);
+      } catch (parseError) {
         return res.status(400).json({
           statusCode: 400,
           success: false,
-          errors: [{
-            message: `Missing mandatory field(s): ${missingFields.join(", ")}`
-          }],
-          message: "Validation error."
+          errors: [{ message: "Invalid JSON format for 'emails' field." }],
+          message: "Parsing error."
         });
       }
+    } else {
+      // If the 'emails' field itself is missing from the multipart form
+      return res.status(400).json({
+        statusCode: 400,
+        success: false,
+        errors: [{ message: "Missing mandatory 'emails' data field." }],
+        message: "Validation error."
+      });
+    }
+
+    // Now destructure from the parsed templateData object
+    const { templateName, subject, htmlContent, type, description } = templateData;
+    // Dynamic validation for missing fields
+    const missingFields = [];
+    if (!templateName) missingFields.push("templateName");
+    if (!subject) missingFields.push("subject");
+    if (!htmlContent) missingFields.push("htmlContent");
+
+if (missingFields.length > 0) {
+  return res.status(400).json({ 
+    statusCode: 400,
+    success: false,
+    errors: [{
+      message: `Missing mandatory field(s): ${missingFields.join(", ")}`
+    }],
+    message: "Validation error."
+  });
+}
+
+    // Handle uploaded files (from req.files.attachments)
+    const uploadedFiles = req.files && req.files.attachments ? req.files.attachments : [];
+
     // Check if a template with the same name already exists
-    const existingTemplate = await Template.findOne({ templateName }); //
-    if (existingTemplate) { //
+    const existingTemplate = await Template.findOne({ templateName });
+    if (existingTemplate) {
       return res.status(409).json({ // 409 Conflict
-        statusCode: 409, //
-        success: false, //
-        errors: [{ message: `Template with name '${templateName}' already exists.` }], //
-        message: "Duplicate template name." //
+        statusCode: 409,
+        success: false,
+        errors: [{ message: `Template with name '${templateName}' already exists.` }],
+        message: "Duplicate template name."
       });
     }
 
@@ -131,33 +154,33 @@ export const addTemplate = async (req, res) => {
       filename: file.originalname,
       path: file.path, // Multer stores the path of the uploaded file
       contentType: file.mimetype,
-      size: file.size // Add size for completeness
+      size: file.size
     }));
 
-    const newTemplate = new Template({ //
-      templateName, //
-      subject, //
-      htmlContent, //
-      type, //
-      description, //
-      attachments: attachmentsMetadata, // Save attachments metadata, not the string array from `req.body`
+    const newTemplate = new Template({
+      templateName,
+      subject,
+      htmlContent,
+      type,
+      description,
+      attachments: attachmentsMetadata, // Save attachments metadata
     });
 
-    const savedTemplate = await newTemplate.save(); //
+    const savedTemplate = await newTemplate.save();
 
-    res.status(201).json({ //
-      statusCode: 201, //
-      success: true, //
-      message: "Template added successfully!", //
-      data: savedTemplate, //
+    res.status(201).json({
+      statusCode: 201,
+      success: true,
+      message: "Template added successfully!",
+      data: savedTemplate,
     });
-  } catch (error) { //
-    console.error("Error adding template:", error); //
-    res.status(500).json({ //
-      statusCode: 500, //
-      success: false, //
-      errors: [{ message: "An unexpected internal server error occurred while adding the template." }], //
-      message: "Internal server error." //
+  } catch (error) {
+    console.error("Error adding template:", error);
+    res.status(500).json({
+      statusCode: 500,
+      success: false,
+      errors: [{ message: "An unexpected internal server error occurred while adding the template." }],
+      message: "Internal server error."
     });
   }
 };
