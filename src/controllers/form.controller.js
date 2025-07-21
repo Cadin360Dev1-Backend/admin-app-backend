@@ -438,12 +438,25 @@ export const handleThankYouSubmission = async (req, res) => {
     for (const emailDetail of parsedEmailData) {
       const { toEmails, subject, message } = emailDetail;
 
-      // Basic validation for mandatory email sending fields for each email
-      if (!toEmails || toEmails.length === 0 || !subject || !message) {
-        console.warn("Skipping email due to missing mandatory fields:", emailDetail);
-        allEmailsSentSuccessfully = false;
-        continue; // Skip to the next email if fields are missing
-      }
+// Dynamic field validation
+  const missingFields = [];
+  if (!toEmails || toEmails.length === 0) missingFields.push("toEmails");
+  if (!subject) missingFields.push("subject");
+  if (!message) missingFields.push("message");
+
+  if (missingFields.length > 0) {
+    const errorMessage = `Missing mandatory field(s): ${missingFields.join(", ")}`;
+    console.warn(errorMessage, emailDetail);
+    sentEmailsInfo.push({
+      recipients: toEmails || [],
+      subject: subject || "(none)",
+      attachmentsCount: attachmentsForEmail.length,
+      status: 'failed',
+      error: errorMessage
+    });
+    allEmailsSentSuccessfully = false;
+    continue;
+  }
 
       // Ensure `toEmails` is an array for consistent processing
       let recipientsArray = toEmails;
