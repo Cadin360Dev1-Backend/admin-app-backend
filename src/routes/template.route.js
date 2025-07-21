@@ -19,10 +19,11 @@ router.get('/', getAllTemplates);
 router.get('/:id', getTemplateById);
 
 // POST a new template
-router.post('/', addTemplate);
+// Use Multer middleware for 'addTemplate' route as well, since it expects attachments (even if optional)
+router.post('/', upload.array('attachments', 10), addTemplate);
 
 // PUT (update) an existing template by ID
-router.put('/:id', updateTemplate);
+router.put('/:id', upload.array('attachments', 10), updateTemplate); // Also use for update if attachments can be updated
 
 // DELETE a template by ID
 router.delete('/:id', deleteTemplate);
