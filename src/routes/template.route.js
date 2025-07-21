@@ -19,8 +19,15 @@ router.get('/', getAllTemplates);
 router.get('/:id', getTemplateById);
 
 // POST a new template
-// Use Multer middleware for 'addTemplate' route as well, since it expects attachments (even if optional)
-router.post('/', upload.array('attachments', 10), addTemplate);
+// Use upload.fields to handle both text fields and an array of attachments
+router.post('/', upload.fields([
+    { name: 'templateName', maxCount: 1 },
+    { name: 'subject', maxCount: 1 },
+    { name: 'htmlContent', maxCount: 1 },
+    { name: 'type', maxCount: 1 }, // Optional field
+    { name: 'description', maxCount: 1 }, // Optional field
+    { name: 'attachments', maxCount: 10 } // Array of files
+]), addTemplate)
 
 // PUT (update) an existing template by ID
 router.put('/:id', upload.array('attachments', 10), updateTemplate); // Also use for update if attachments can be updated
