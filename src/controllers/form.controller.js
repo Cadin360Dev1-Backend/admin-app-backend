@@ -383,26 +383,23 @@ export const submitSamplePdfForm = async (req, res) => {
 export const handleThankYouSubmission = async (req, res) => {
   try {
     console.log("handleThankYouSubmission: Incoming request body:", req.body);
-    console.log("handleThankYouSubmission: Incoming files:", req.files); // `req.files` populated by Multer
+    console.log("handleThankYouSubmission: Incoming files:", req.files); // Multer populates this
 
-    // Destructure the 'emails' field from req.body, which should be a JSON string
     const { emails } = req.body || {};
-    // req.files will contain the 'attachments' array
 
     let parsedEmailData;
     try {
-      // Parse the 'emails' field which is expected to be a JSON string
+      // Parse the 'emails' field
       if (typeof emails === 'string') {
         parsedEmailData = JSON.parse(emails);
       } else if (Array.isArray(emails)) {
-        // If Multer already parsed it into an array of objects
         parsedEmailData = emails;
       } else {
         return res.status(400).json({
           statusCode: 400,
           success: false,
-          errors: [{ message: "Invalid 'emails' data format. Expected a JSON string or array." }],
-          message: "Validation error: Invalid 'emails' data."
+          message: "Email sending failed. 'emails' field must be a valid JSON string or array.",
+          errors: [{ message: "Invalid 'emails' format." }]
         });
       }
     } catch (parseError) {
@@ -410,21 +407,40 @@ export const handleThankYouSubmission = async (req, res) => {
       return res.status(400).json({
         statusCode: 400,
         success: false,
-        errors: [{ message: "Failed to parse 'emails' data. Ensure it's valid JSON." }],
-        message: "Validation error: Invalid 'emails' JSON."
+        message: "Email sending failed. Could not parse 'emails' JSON.",
+        errors: [{ message: "Malformed 'emails' JSON." }]
       });
     }
 
-    // Process attachments uploaded via Multer for this email
+    // ✅ Dynamic missing field validation (only first email is checked)
+    const firstEmail = parsedEmailData?.[0];
+    const missingFields = [];
+    if (!firstEmail?.toEmails || firstEmail.toEmails.length === 0) missingFields.push("toEmails");
+    if (!firstEmail?.subject) missingFields.push("subject");
+    if (!firstEmail?.message) missingFields.push("message");
+
+    if (missingFields.length > 0) {
+      const fieldList = missingFields.join(", ");
+      return res.status(400).json({
+        statusCode: 400,
+        success: false,
+        message: `Email sending failed. Missing required field${missingFields.length > 1 ? 's' : ''}: ${fieldList}.`,
+        errors: [
+          {
+            message: `Missing field${missingFields.length > 1 ? 's' : ''}: ${fieldList}`
+          }
+        ]
+      });
+    }
+
+    // ✅ Prepare attachments
     const attachmentsForEmail = [];
-    // req.files is an object where keys are field names (e.g., 'attachments')
-    // and values are arrays of files.
     if (req.files && req.files.attachments && req.files.attachments.length > 0) {
       req.files.attachments.forEach(file => {
         const relativePath = path.join('uploads', file.filename);
         attachmentsForEmail.push({
           filename: file.originalname,
-          path: path.join(process.cwd(), relativePath), // Absolute path for Nodemailer
+          path: path.join(process.cwd(), relativePath), // absolute path for nodemailer
           contentType: file.mimetype,
           size: file.size
         });
@@ -434,31 +450,10 @@ export const handleThankYouSubmission = async (req, res) => {
     const sentEmailsInfo = [];
     let allEmailsSentSuccessfully = true;
 
-    // Loop through each email object in the parsedEmailData array
     for (const emailDetail of parsedEmailData) {
       const { toEmails, subject, message } = emailDetail;
 
-// Dynamic field validation
-  const missingFields = [];
-  if (!toEmails || toEmails.length === 0) missingFields.push("toEmails");
-  if (!subject) missingFields.push("subject");
-  if (!message) missingFields.push("message");
-
-  if (missingFields.length > 0) {
-    const errorMessage = `Missing mandatory field(s): ${missingFields.join(", ")}`;
-    console.warn(errorMessage, emailDetail);
-    sentEmailsInfo.push({
-      recipients: toEmails || [],
-      subject: subject || "(none)",
-      attachmentsCount: attachmentsForEmail.length,
-      status: 'failed',
-      error: errorMessage
-    });
-    allEmailsSentSuccessfully = false;
-    continue;
-  }
-
-      // Ensure `toEmails` is an array for consistent processing
+      // Normalize recipients array
       let recipientsArray = toEmails;
       if (!Array.isArray(toEmails)) {
         if (typeof toEmails === 'string' && toEmails.includes(',')) {
@@ -468,71 +463,75 @@ export const handleThankYouSubmission = async (req, res) => {
         }
       }
 
-      // Validate email formats for all recipients
-      const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/;
-      const invalidEmailsInRequest = recipientsArray.filter(email => !emailRegex.test(email));
-      if (invalidEmailsInRequest.length > 0) {
-        console.warn(`Skipping email due to invalid email format for: ${invalidEmailsInRequest.join(', ')}`, emailDetail);
+      // Validate email formats
+      const emailRegex = /^[\w.-]+@[a-zA-Z\d.-]+\.[a-zA-Z]{2,}$/;
+      const invalidEmails = recipientsArray.filter(email => !emailRegex.test(email));
+
+      if (invalidEmails.length > 0) {
+        const errorMsg = `Invalid email format: ${invalidEmails.join(", ")}`;
+        console.warn(errorMsg);
+        sentEmailsInfo.push({
+          recipients: recipientsArray,
+          subject: subject || "(none)",
+          attachmentsCount: attachmentsForEmail.length,
+          status: "failed",
+          error: errorMsg
+        });
         allEmailsSentSuccessfully = false;
-        continue; // Skip to the next email if invalid formats are found
+        continue;
       }
 
       try {
         await sendEmail(recipientsArray, subject, message, attachmentsForEmail);
         sentEmailsInfo.push({
           recipients: recipientsArray,
-          subject: subject,
+          subject,
           attachmentsCount: attachmentsForEmail.length,
-          status: 'success'
+          status: "success"
         });
       } catch (emailError) {
-        console.error(`Failed to send email to ${recipientsArray.join(', ')}:`, emailError);
+        console.error(`Email send failed to ${recipientsArray.join(", ")}:`, emailError.message);
         sentEmailsInfo.push({
           recipients: recipientsArray,
-          subject: subject,
+          subject,
           attachmentsCount: attachmentsForEmail.length,
-          status: 'failed',
+          status: "failed",
           error: emailError.message
         });
         allEmailsSentSuccessfully = false;
       }
     }
 
+    // ✅ Final response
     if (allEmailsSentSuccessfully) {
-      res.status(200).json({
+      return res.status(200).json({
         statusCode: 200,
         success: true,
-        message: `All specified emails sent successfully!`,
+        message: "All emails sent successfully.",
         sentEmails: sentEmailsInfo
       });
     } else {
-      res.status(207).json({ // 207 Multi-Status if some succeeded and some failed
+      const failedCount = sentEmailsInfo.filter(e => e.status === 'failed').length;
+      const totalCount = sentEmailsInfo.length;
+      const successCount = totalCount - failedCount;
+
+      return res.status(207).json({
         statusCode: 207,
-        success: false, // Indicate partial success or failure
-        message: `Some emails failed to send. Check 'sentEmails' for details.`,
+        success: false,
+        message: `${failedCount} out of ${totalCount} emails failed to send. ${successCount} succeeded.`,
         sentEmails: sentEmailsInfo
       });
     }
-
   } catch (error) {
-    console.error("Unhandled error in handleThankYouSubmission:", error);
-    if (error.message && error.message.startsWith('Error:')) {
-      return res.status(400).json({
-        statusCode: 400,
-        success: false,
-        errors: [{ message: error.message }],
-        message: "File upload error."
-      });
-    }
-    res.status(500).json({
+    console.error("Unexpected error:", error);
+    return res.status(500).json({
       statusCode: 500,
       success: false,
-      errors: [{ message: "An unexpected internal server error occurred. Please try again later." }],
-      message: "Internal server error."
+      message: "An unexpected internal server error occurred.",
+      errors: [{ message: error.message || "Internal error." }]
     });
   }
 };
-
 
 // Controller function to fetch all bundle form submissions
 export const fetchBundleSubmissions = async (req, res) => {
