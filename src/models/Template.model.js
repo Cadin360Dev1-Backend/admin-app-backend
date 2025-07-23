@@ -33,24 +33,23 @@ const templateSchema = new mongoose.Schema({
     trim: true,
   },
    // Attachments array, now with optional fields for each attachment
-  attachments: [{
+   attachments: [{
     filename: {
       type: String,
-      // required: true, // Removed, now optional
     },
-    path: { // Relative path where the file is stored on the server
+    // Store Cloudinary secure_url
+    secure_url: {
       type: String,
-      // required: true, // Removed, now optional
+    },
+    // Store Cloudinary public_id for future deletion/management
+    public_id: {
+      type: String,
     },
     contentType: {
       type: String,
-      // required: true, // Removed, now optional
-    },
-    size: {
-      type: Number, // Size in bytes
-      // required: true, // Removed, now optional
     }
   }],
+  
 }, {
   timestamps: true // Adds createdAt and updatedAt timestamps automatically
 });

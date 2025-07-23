@@ -1,10 +1,11 @@
 // src/controllers/template.controller.js
 import { Template } from '../models/Template.model.js';
-import { sendEmail } from '../utils/mailer.js'; // Import the generic sendEmail function
-import path from 'path'; // Import path module
-import { fileURLToPath } from 'url'; // For __dirname equivalent in ES Modules
+import { sendEmail } from '../utils/mailer.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import cloudinary from '../config/cloudinaryConfig.js'; // Import cloudinary
+import fs from 'fs'; // Import fs for file system operations
 
-// Get __dirname equivalent for local file paths in ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -14,7 +15,7 @@ const __dirname = path.dirname(__filename);
  */
 export const getAllTemplates = async (req, res) => {
   try {
-    const templates = await Template.find({}); // Fetch all templates
+    const templates = await Template.find({});
     res.status(200).json({
       statusCode: 200,
       success: true,
@@ -38,7 +39,7 @@ export const getAllTemplates = async (req, res) => {
  */
 export const getTemplateById = async (req, res) => {
   try {
-    const { id } = req.params; // Get template ID from URL parameters
+    const { id } = req.params;
 
     const template = await Template.findById(id);
 
@@ -59,7 +60,7 @@ export const getTemplateById = async (req, res) => {
     });
   } catch (error) {
     console.error(`Error fetching template with ID ${req.params.id}:`, error);
-    if (error.name === 'CastError') { // Mongoose CastError for invalid ID format
+    if (error.name === 'CastError') {
       return res.status(400).json({
         statusCode: 400,
         success: false,
@@ -83,29 +84,21 @@ export const getTemplateById = async (req, res) => {
  */
 export const addTemplate = async (req, res) => {
   try {
-    // For text fields from multipart/form-data, they are directly in req.body
-    const { templateName, subject, htmlContent, type, description } = req.body; 
+    const { templateName, subject, htmlContent, type, description } = req.body;
+    const uploadedFiles = req.files && req.files.attachments ? req.files.attachments : [];
 
-    // If you are expecting files, they will be in req.files
-    const uploadedFiles = req.files && req.files.attachments ? req.files.attachments : []; //
-
-    // // Basic validation for text fields
-    // if (!templateName || !subject || !htmlContent) { //
-    //   return res.status(400).json({ //
-    //     statusCode: 400, //
-    //     success: false, //
-    //     errors: [{ message: "Missing mandatory fields: templateName, subject, and htmlContent are required." }], //
-    //     message: "Validation error." //
-    //   });
-    // }
-
-    // Dynamic validation for missing fields
     const missingFields = [];
     if (!templateName) missingFields.push("templateName");
     if (!subject) missingFields.push("subject");
     if (!htmlContent) missingFields.push("htmlContent");
 
     if (missingFields.length > 0) {
+      // Delete locally uploaded files if validation fails
+      uploadedFiles.forEach(file => {
+        fs.unlink(file.path, (err) => {
+          if (err) console.error("Error deleting local file after validation failure:", err);
+        });
+      });
       return res.status(400).json({
         statusCode: 400,
         success: false,
@@ -115,49 +108,89 @@ export const addTemplate = async (req, res) => {
         message: "Validation error."
       });
     }
-    // Check if a template with the same name already exists
-    const existingTemplate = await Template.findOne({ templateName }); 
-    if (existingTemplate) { 
-      return res.status(409).json({ // 409 Conflict
-        statusCode: 409, 
-        success: false, 
-        errors: [{ message: `Template with name '${templateName}' already exists.` }], 
-        message: "Duplicate template name." 
+
+    const existingTemplate = await Template.findOne({ templateName });
+    if (existingTemplate) {
+      // Delete locally uploaded files if template name already exists
+      uploadedFiles.forEach(file => {
+        fs.unlink(file.path, (err) => {
+          if (err) console.error("Error deleting local file after duplicate template name:", err);
+        });
+      });
+      return res.status(409).json({
+        statusCode: 409,
+        success: false,
+        errors: [{ message: `Template with name '${templateName}' already exists.` }],
+        message: "Duplicate template name."
       });
     }
 
-    // Process uploaded files to store their metadata (filename, path, etc.)
-    const attachmentsMetadata = uploadedFiles.map(file => ({
-      filename: file.originalname,
-      path: file.path, // Multer stores the path of the uploaded file
-      contentType: file.mimetype,
-      size: file.size // Add size for completeness
-    }));
+    // Process and upload attachments to Cloudinary
+    const attachmentsMetadata = [];
+    for (const file of uploadedFiles) {
+      try {
+        const uploadResult = await cloudinary.uploader.upload(file.path, {
+          folder: 'email_attachments', // Specify a folder in Cloudinary
+          resource_type: 'auto', // Automatically detect resource type
+        });
+        attachmentsMetadata.push({
+          filename: file.originalname,
+          secure_url: uploadResult.secure_url,
+          public_id: uploadResult.public_id,
+          contentType: file.mimetype,
+        });
+        // Delete the local file after successful Cloudinary upload
+        fs.unlink(file.path, (err) => {
+          if (err) console.error("Error deleting local file after Cloudinary upload:", err);
+        });
+      } catch (uploadError) {
+        console.error(`Error uploading file ${file.originalname} to Cloudinary:`, uploadError);
+        // Delete local file even if Cloudinary upload fails
+        fs.unlink(file.path, (err) => {
+          if (err) console.error("Error deleting local file after Cloudinary upload failure:", err);
+        });
+        // Re-throw or handle as appropriate for your application
+        return res.status(500).json({
+          statusCode: 500,
+          success: false,
+          errors: [{ message: `Failed to upload attachment ${file.originalname}: ${uploadError.message}` }],
+          message: "Attachment upload error."
+        });
+      }
+    }
 
-    const newTemplate = new Template({ 
-      templateName, 
-      subject, 
-      htmlContent, 
-      type, 
-      description, 
-      attachments: attachmentsMetadata, // Save attachments metadata, not the string array from `req.body`
+    const newTemplate = new Template({
+      templateName,
+      subject,
+      htmlContent,
+      type,
+      description,
+      attachments: attachmentsMetadata,
     });
 
-    const savedTemplate = await newTemplate.save(); 
+    const savedTemplate = await newTemplate.save();
 
-    res.status(201).json({ 
-      statusCode: 201, 
-      success: true, 
-      message: "Template added successfully!", 
-      data: savedTemplate, 
+    res.status(201).json({
+      statusCode: 201,
+      success: true,
+      message: "Template added successfully!",
+      data: savedTemplate,
     });
-  } catch (error) { 
-    console.error("Error adding template:", error); 
-    res.status(500).json({ 
-      statusCode: 500, 
-      success: false, 
+  } catch (error) {
+    console.error("Error adding template:", error);
+    // If an error occurs before files are processed/deleted, ensure cleanup
+    if (req.files && req.files.attachments) {
+      req.files.attachments.forEach(file => {
+        fs.unlink(file.path, (err) => {
+          if (err) console.error("Error deleting local file during error handling in addTemplate:", err);
+        });
+      });
+    }
+    res.status(500).json({
+      statusCode: 500,
+      success: false,
       errors: [{ message: "An unexpected internal server error occurred while adding the template." }],
-      message: "Internal server error." 
+      message: "Internal server error."
     });
   }
 };
@@ -169,29 +202,55 @@ export const addTemplate = async (req, res) => {
  */
 export const updateTemplate = async (req, res) => {
   try {
-    const { id } = req.params; // Get template ID from URL parameters
-    const updates = req.body; // Get update fields from request body
+    const { id } = req.params;
+    const updates = req.body;
+    const uploadedFiles = req.files; // Multer's `upload.array` puts files directly into `req.files`
 
-    // Check if any update fields are provided
-    if (Object.keys(updates).length === 0) {
+    if (Object.keys(updates).length === 0 && (!uploadedFiles || uploadedFiles.length === 0)) {
       return res.status(400).json({
         statusCode: 400,
         success: false,
-        errors: [{ message: "No update fields provided." }],
+        errors: [{ message: "No update fields or files provided." }],
         message: "No data to update."
       });
     }
 
-    // Prevent updating _id or createdAt/updatedAt directly
     delete updates._id;
     delete updates.createdAt;
     delete updates.updatedAt;
     delete updates.__v;
 
-    // If templateName is being updated, check for uniqueness
-    if (updates.templateName) {
-      const existingTemplate = await Template.findOne({ templateName: updates.templateName });
-      if (existingTemplate && existingTemplate._id.toString() !== id) {
+    // Find the existing template to get its current attachments
+    const existingTemplate = await Template.findById(id);
+    if (!existingTemplate) {
+      // If a new file was uploaded locally, delete it since the item doesn't exist
+      if (uploadedFiles && uploadedFiles.length > 0) {
+        uploadedFiles.forEach(file => {
+          fs.unlink(file.path, (err) => {
+            if (err) console.error("Error deleting local file (template not found):", err);
+          });
+        });
+      }
+      return res.status(404).json({
+        statusCode: 404,
+        success: false,
+        errors: [{ message: "Template not found." }],
+        message: "Not Found."
+      });
+    }
+
+    // Handle templateName uniqueness check during update
+    if (updates.templateName && updates.templateName !== existingTemplate.templateName) {
+      const nameConflictTemplate = await Template.findOne({ templateName: updates.templateName });
+      if (nameConflictTemplate && nameConflictTemplate._id.toString() !== id) {
+        // Delete local files if name conflict
+        if (uploadedFiles && uploadedFiles.length > 0) {
+          uploadedFiles.forEach(file => {
+            fs.unlink(file.path, (err) => {
+              if (err) console.error("Error deleting local file due to name conflict:", err);
+            });
+          });
+        }
         return res.status(409).json({
           statusCode: 409,
           success: false,
@@ -201,33 +260,67 @@ export const updateTemplate = async (req, res) => {
       }
     }
 
-    // Basic validation for attachments if provided in updates
-    if (updates.attachments && !Array.isArray(updates.attachments)) {
-      return res.status(400).json({
-        statusCode: 400,
-        success: false,
-        errors: [{ message: "Attachments must be an array if provided." }],
-        message: "Validation error."
-      });
-    }
-    if (updates.attachments) {
-      for (const attachment of updates.attachments) {
-        if (!attachment.filename || (!attachment.content && !attachment.path)) {
-          return res.status(400).json({
-            statusCode: 400,
+    let newAttachmentsMetadata = existingTemplate.attachments || [];
+
+    // If new files are uploaded, process them
+    if (uploadedFiles && uploadedFiles.length > 0) {
+      // Delete old attachments from Cloudinary
+      for (const attachment of existingTemplate.attachments) {
+        if (attachment.public_id) {
+          try {
+            await cloudinary.uploader.destroy(attachment.public_id, { resource_type: 'raw' }); // Assuming 'raw' for all email attachments
+            console.log(`Deleted old Cloudinary attachment: ${attachment.public_id}`);
+          } catch (destroyError) {
+            console.error(`Error deleting old Cloudinary attachment ${attachment.public_id}:`, destroyError);
+            // Continue even if old attachment deletion fails to avoid blocking the update
+          }
+        }
+      }
+
+      // Upload new attachments to Cloudinary
+      newAttachmentsMetadata = []; // Reset attachments
+      for (const file of uploadedFiles) {
+        try {
+          const uploadResult = await cloudinary.uploader.upload(file.path, {
+            folder: 'email_attachments',
+            resource_type: 'auto',
+          });
+          newAttachmentsMetadata.push({
+            filename: file.originalname,
+            secure_url: uploadResult.secure_url,
+            public_id: uploadResult.public_id,
+            contentType: file.mimetype,
+          });
+          // Delete local file after successful Cloudinary upload
+          fs.unlink(file.path, (err) => {
+            if (err) console.error("Error deleting local file after new Cloudinary upload:", err);
+          });
+        } catch (uploadError) {
+          console.error(`Error uploading new file ${file.originalname} to Cloudinary during update:`, uploadError);
+          fs.unlink(file.path, (err) => {
+            if (err) console.error("Error deleting local file after new Cloudinary upload failure:", err);
+          });
+          // Rollback: If new uploads fail, consider reverting or indicating partial failure
+          return res.status(500).json({
+            statusCode: 500,
             success: false,
-            errors: [{ message: "Each attachment must have a 'filename' and either 'content' (base64) or 'path'." }],
-            message: "Invalid attachment data."
+            errors: [{ message: `Failed to upload new attachment ${file.originalname}: ${uploadError.message}` }],
+            message: "Attachment upload error during update."
           });
         }
       }
     }
 
+    // Merge new attachments with updates, or just use existing if no new files were uploaded
+    const updateFields = {
+      ...updates,
+      attachments: newAttachmentsMetadata,
+    };
 
     const updatedTemplate = await Template.findByIdAndUpdate(
       id,
-      { $set: updates }, // Use $set to update only provided fields
-      { new: true, runValidators: true } // Return the updated document and run schema validators
+      { $set: updateFields },
+      { new: true, runValidators: true }
     );
 
     if (!updatedTemplate) {
@@ -247,6 +340,14 @@ export const updateTemplate = async (req, res) => {
     });
   } catch (error) {
     console.error(`Error updating template with ID ${req.params.id}:`, error);
+    // If an error occurs, ensure locally uploaded files are deleted
+    if (req.files && req.files.length > 0) {
+      req.files.forEach(file => {
+        fs.unlink(file.path, (err) => {
+          if (err) console.error("Error deleting local file during update error handling:", err);
+        });
+      });
+    }
     if (error.name === 'CastError') {
       return res.status(400).json({
         statusCode: 400,
@@ -255,7 +356,7 @@ export const updateTemplate = async (req, res) => {
         message: "Invalid ID."
       });
     }
-    if (error.code === 11000) { // Duplicate key error for unique fields
+    if (error.code === 11000) {
       return res.status(409).json({
         statusCode: 409,
         success: false,
@@ -278,7 +379,7 @@ export const updateTemplate = async (req, res) => {
  */
 export const deleteTemplate = async (req, res) => {
   try {
-    const { id } = req.params; // Get template ID from URL parameters
+    const { id } = req.params;
 
     const deletedTemplate = await Template.findByIdAndDelete(id);
 
@@ -291,11 +392,29 @@ export const deleteTemplate = async (req, res) => {
       });
     }
 
+    // Also delete attachments from Cloudinary if they exist
+    if (deletedTemplate.attachments && deletedTemplate.attachments.length > 0) {
+      for (const attachment of deletedTemplate.attachments) {
+        if (attachment.public_id) {
+          try {
+            const destroyResult = await cloudinary.uploader.destroy(attachment.public_id, { resource_type: 'raw' });
+            console.log(`Cloudinary deletion result for ${attachment.public_id}:`, destroyResult);
+            if (destroyResult.result !== 'ok' && destroyResult.result !== 'not found') {
+                console.error('Failed to delete attachment from Cloudinary:', destroyResult);
+            }
+          } catch (destroyError) {
+            console.error(`Error deleting Cloudinary attachment ${attachment.public_id}:`, destroyError);
+            // Log the error but don't prevent the template deletion from proceeding
+          }
+        }
+      }
+    }
+
     res.status(200).json({
       statusCode: 200,
       success: true,
       message: "Template deleted successfully!",
-      data: deletedTemplate, // Optionally return the deleted document
+      data: deletedTemplate,
     });
   } catch (error) {
     console.error(`Error deleting template with ID ${req.params.id}:`, error);
@@ -339,8 +458,15 @@ export const sendEmailFromTemplate = async (req, res) => {
 
     const { templateId, toEmails, subject, message } = req.body;
 
-    // Basic validation for mandatory fields for sending an email
     if (!templateId || !toEmails || (Array.isArray(toEmails) && toEmails.length === 0)) {
+      // Delete local files if validation fails
+      if (req.files && req.files.length > 0) {
+        req.files.forEach(file => {
+          fs.unlink(file.path, (err) => {
+            if (err) console.error("Error deleting local file after sendEmailFromTemplate validation failure:", err);
+          });
+        });
+      }
       return res.status(400).json({
         statusCode: 400,
         success: false,
@@ -348,10 +474,17 @@ export const sendEmailFromTemplate = async (req, res) => {
       });
     }
 
-    // Fetch the template from the database
     const template = await Template.findById(templateId);
 
     if (!template) {
+      // Delete local files if template not found
+      if (req.files && req.files.length > 0) {
+        req.files.forEach(file => {
+          fs.unlink(file.path, (err) => {
+            if (err) console.error("Error deleting local file after template not found:", err);
+          });
+        });
+      }
       return res.status(404).json({
         statusCode: 404,
         success: false,
@@ -359,21 +492,26 @@ export const sendEmailFromTemplate = async (req, res) => {
       });
     }
 
-    // Ensure `toEmails` is an array for consistent processing
     let recipientsArray = toEmails;
     if (!Array.isArray(toEmails)) {
-      // If `toEmails` comes as a single string (e.g., "email1@a.com,email2@b.com"), split it
       if (typeof toEmails === 'string' && toEmails.includes(',')) {
         recipientsArray = toEmails.split(',').map(email => email.trim());
       } else {
-        recipientsArray = [toEmails]; // Convert single string email to an array
+        recipientsArray = [toEmails];
       }
     }
 
-    // Validate email formats for all recipients
     const emailRegex = /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/;
     const invalidEmailsInRequest = recipientsArray.filter(email => !emailRegex.test(email));
     if (invalidEmailsInRequest.length > 0) {
+      // Delete local files if email format is invalid
+      if (req.files && req.files.length > 0) {
+        req.files.forEach(file => {
+          fs.unlink(file.path, (err) => {
+            if (err) console.error("Error deleting local file after invalid email format:", err);
+          });
+        });
+      }
       return res.status(400).json({
         statusCode: 400,
         success: false,
@@ -382,30 +520,62 @@ export const sendEmailFromTemplate = async (req, res) => {
       });
     }
 
-    // --- Process and prepare attachments for email ---
-    const attachmentsForEmail = []; // This array will contain attachment objects for Nodemailer
-    if (req.files && req.files.length > 0) {
-      req.files.forEach(file => {
-        const relativePath = path.join('uploads', file.filename); // Assuming Multer saves to 'uploads'
-        attachmentsForEmail.push({
-          filename: file.originalname,
-          path: path.join(process.cwd(), relativePath), // Absolute path for Nodemailer to find the file
-          contentType: file.mimetype
-        });
-      });
-    }
-    // --- End attachment processing ---
+    const attachmentsForEmail = [];
 
-    // Determine the final subject and HTML content for the email
-    // Prioritize subject/message from request body, otherwise use template's
+    // Add attachments from the template
+    if (template.attachments && template.attachments.length > 0) {
+        template.attachments.forEach(attachment => {
+            if (attachment.secure_url) {
+                attachmentsForEmail.push({
+                    filename: attachment.filename,
+                    path: attachment.secure_url, // Use Cloudinary URL as path for Nodemailer
+                    contentType: attachment.contentType
+                });
+            }
+        });
+    }
+
+    // Add attachments from the current request (newly uploaded files for this specific email send)
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        try {
+          const uploadResult = await cloudinary.uploader.upload(file.path, {
+            folder: 'email_send_temp_attachments', // Use a temporary folder for send-specific attachments
+            resource_type: 'auto',
+          });
+          attachmentsForEmail.push({
+            filename: file.originalname,
+            path: uploadResult.secure_url, // Use Cloudinary URL
+            contentType: file.mimetype,
+            // You might want to store public_id here if you plan to delete these temporary files later
+            // public_id: uploadResult.public_id
+          });
+          // Delete the local file after successful Cloudinary upload
+          fs.unlink(file.path, (err) => {
+            if (err) console.error("Error deleting local file after Cloudinary upload for send-email:", err);
+          });
+        } catch (uploadError) {
+          console.error(`Error uploading temporary file ${file.originalname} to Cloudinary for email send:`, uploadError);
+          // Delete local file even if Cloudinary upload fails
+          fs.unlink(file.path, (err) => {
+            if (err) console.error("Error deleting local file after temporary Cloudinary upload failure:", err);
+          });
+          return res.status(500).json({
+            statusCode: 500,
+            success: false,
+            errors: [{ message: `Failed to upload attachment for email send: ${file.originalname} - ${uploadError.message}` }],
+            message: "Email attachment upload error."
+          });
+        }
+      }
+    }
+
     const finalSubject = subject || template.subject;
     const finalHtmlContent = message || template.htmlContent;
 
     try {
-      // Send the email using the mailer utility with recipients, subject, HTML, and attachments
       await sendEmail(recipientsArray, finalSubject, finalHtmlContent, attachmentsForEmail);
 
-      // Prepare attachment names for the success message
       const attachmentNames = attachmentsForEmail.map(attach => attach.filename).join(', ') || 'none';
 
       res.status(200).json({
@@ -415,12 +585,11 @@ export const sendEmailFromTemplate = async (req, res) => {
                  `${attachmentsForEmail.length > 0 ? `with attachment(s): ${attachmentNames}` : 'without attachments'}.`,
         recipients: recipientsArray,
         subject: finalSubject,
-        attachments: attachmentsForEmail.map(attach => ({ filename: attach.filename, size: attach.size, contentType: attach.contentType })) // Return simplified attachment info
+        // Return simplified attachment info, including secure_url
+        attachments: attachmentsForEmail.map(attach => ({ filename: attach.filename, secure_url: attach.path, contentType: attach.contentType }))
       });
     } catch (emailError) {
       console.error('Error sending template email:', emailError);
-      // If email sending fails, you might want to consider deleting the locally saved files
-      // to avoid orphaned files, especially in a production environment.
       res.status(500).json({
         statusCode: 500,
         success: false,
@@ -431,16 +600,22 @@ export const sendEmailFromTemplate = async (req, res) => {
 
   } catch (error) {
     console.error('Unhandled error in sendEmailFromTemplate:', error);
-    // Catch Multer errors (e.g., file size limit exceeded, invalid file type)
     if (error.message && error.message.startsWith('Error:')) {
+      // Ensure local files are cleaned up if Multer error occurred
+      if (req.files && req.files.length > 0) {
+        req.files.forEach(file => {
+          fs.unlink(file.path, (err) => {
+            if (err) console.error("Error deleting local file during sendEmailFromTemplate error:", err);
+          });
+        });
+      }
       return res.status(400).json({
         statusCode: 400,
         success: false,
         errors: [{ message: error.message }],
-        message: "File upload error: " + error.message // Provide more specific Multer error
+        message: "File upload error: " + error.message
       });
     }
-    // Catch any other unexpected errors
     res.status(500).json({
       statusCode: 500,
       success: false,
