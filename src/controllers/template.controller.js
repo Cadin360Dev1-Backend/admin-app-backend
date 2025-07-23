@@ -20,6 +20,7 @@ export const getAllTemplates = async (req, res) => {
       statusCode: 200,
       success: true,
       message: "Templates fetched successfully!",
+      templateCount: templates.length,
       data: templates,
     });
   } catch (error) {
