@@ -27,6 +27,9 @@ const gallerySchema = new mongoose.Schema({
     enum: ['image', 'video', 'raw'], // Define allowed media types (e.g., 'image', 'video', 'raw' for other files)
     default: 'image', // Default to image if not specified
   },
+  originalName: {
+  type: String,
+},
   cloudinaryPublicId: {
     type: String,
     // required: true, // Removed: no longer required

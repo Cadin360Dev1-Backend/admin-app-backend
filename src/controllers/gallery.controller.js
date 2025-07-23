@@ -3,68 +3,99 @@ import { CLIENT_RENEG_LIMIT } from 'tls';
 import cloudinary from '../config/cloudinaryConfig.js'; // Import the configured Cloudinary instance
 import { Gallery } from '../models/Gallery.model.js';   // Import the Gallery Mongoose model
 import fs from 'fs'; // Node.js file system module for deleting local files
+import { uploadToDrive } from '../utils/googleDriveUploader.js';
 
 /**
- * Controller function to upload media to Cloudinary and save its details to MongoDB.
+ * Controller function to upload media to Cloudinary or Google Drive and save its details to MongoDB.
+ * 
+ * - If the uploaded file is an image or video, it will be stored on Cloudinary.
+ * - If the uploaded file is a PDF or ZIP, it will be stored on Google Drive.
+ * 
  * POST /api/gallery/upload
- * Expected: multipart/form-data with a 'media' field (file).
- * Body can also include 'title', 'description', 'category', 'tags'.
+ * 
+ * Expected:
+ * - multipart/form-data with a 'media' field (file)
+ * - Body fields can also include: 'title', 'description', 'category', 'tags'
+ * 
+ * Response:
+ * - Returns the stored media URL (Cloudinary or Google Drive)
+ * - Saves media details in MongoDB
  */
+
 export const uploadMedia = async (req, res) => {
   try {
-    // No longer checking if req.file is provided as a required field.
-    // The upload will proceed even without a file, but Cloudinary will not be used.
-
     const { title, description, category } = req.body;
-    // Tags can be a comma-separated string or an array; convert to array if string
-    const tags = req.body.tags ? (Array.isArray(req.body.tags) ? req.body.tags : req.body.tags.split(',').map(tag => tag.trim())) : [];
+    const tags = req.body.tags
+      ? Array.isArray(req.body.tags)
+        ? req.body.tags
+        : req.body.tags.split(',').map(tag => tag.trim())
+      : [];
 
     let mediaUrl = '';
-    let mediaType = 'raw'; // Default to 'raw' if no file or unknown type
+    let mediaType = 'raw';
     let cloudinaryPublicId = '';
 
-    // Only attempt Cloudinary upload if a file is provided
-    if (req.file) {
-      // Determine resource type for Cloudinary based on mimetype
-      let resourceType = 'auto'; // Cloudinary will automatically detect
-      if (req.file.mimetype.startsWith('image/')) {
-        resourceType = 'image';
-      } else if (req.file.mimetype.startsWith('video/')) {
-        resourceType = 'video';
-      } else {
-        resourceType = 'raw'; // For other file types like documents
-      }
-
-      // Upload the file to Cloudinary
-      const result = await cloudinary.uploader.upload(req.file.path, {
-        resource_type: resourceType, // 'image', 'video', or 'raw'
-        folder: 'gallery_uploads', // Optional: specify a folder in your Cloudinary account
-        // You can add more options here, e.g., transformations, tags, etc.
-        // tags: tags.join(',') // Cloudinary tags (comma-separated string)
+    if (!req.file) {
+      return res.status(400).json({
+        statusCode: 400,
+        success: false,
+        message: 'No file uploaded.',
       });
+    }
 
-      // Delete the local file after successful upload to Cloudinary
-      fs.unlink(req.file.path, (err) => {
-        if (err) console.error("Error deleting local file:", err);
+    const mime = req.file.mimetype;
+    const originalName = req.file.originalname;
+    const baseName = originalName.replace(/\.[^/.]+$/, '');
+    const uniqueFileName = `${Date.now()}_${baseName.replace(/\s+/g, '_')}`;
+    const filePath = req.file.path;
+
+    const isPdf = mime === 'application/pdf';
+    const isZip = ['application/zip', 'application/x-zip-compressed'].includes(mime);
+    const isImage = mime.startsWith('image/');
+    const isVideo = mime.startsWith('video/');
+
+    if (isPdf || isZip) {
+      const { viewUrl } = await uploadToDrive(filePath, uniqueFileName, mime);
+      fs.unlink(filePath, () => {});
+      mediaUrl = viewUrl;
+      mediaType = isPdf ? 'pdf' : 'zip';
+      console.log(`📁 Uploaded to Google Drive as ${mediaType}: ${viewUrl}`);
+
+    } else if (isImage || isVideo) {
+      let resourceType = isImage ? 'image' : 'video';
+      const result = await cloudinary.uploader.upload(filePath, {
+        resource_type: resourceType,
+        folder: 'gallery_uploads',
+        public_id: uniqueFileName,
+        use_filename: true,
+        unique_filename: false,
       });
-
+      fs.unlink(filePath, () => {});
       mediaUrl = result.secure_url;
       mediaType = result.resource_type;
       cloudinaryPublicId = result.public_id;
+      console.log(`☁️ Uploaded to Cloudinary as ${mediaType}: ${result.secure_url}`);
+
+    } else {
+      fs.unlink(filePath, () => {});
+      return res.status(400).json({
+        statusCode: 400,
+        success: false,
+        message: 'Unsupported file type. Only image, video, PDF, and ZIP are allowed.',
+      });
     }
 
-    // Create a new gallery item document
     const newGalleryItem = new Gallery({
       title,
       description,
-      mediaUrl, // URL of the uploaded media on Cloudinary (or empty if no file)
-      mediaType, // Type detected by Cloudinary (image, video, raw) or default
-      cloudinaryPublicId, // Public ID for future updates/deletions (or empty if no file)
+      mediaUrl,
+      mediaType,
+      originalName,
+      cloudinaryPublicId,
       category,
       tags,
     });
 
-    // Save the gallery item details to MongoDB
     const savedItem = await newGalleryItem.save();
 
     res.status(201).json({
@@ -73,19 +104,11 @@ export const uploadMedia = async (req, res) => {
       message: 'Media details saved successfully!',
       data: savedItem,
     });
-
-    // console.log('Media uploaded and details saved:', savedItem);
   } catch (error) {
     console.error('Error uploading media:', error);
-
-    // If a file was uploaded locally before an error occurred (e.g., Cloudinary upload fails)
     if (req.file) {
-      fs.unlink(req.file.path, (err) => {
-        if (err) console.error("Error deleting local file during error handling:", err);
-      });
+      fs.unlink(req.file.path, () => {});
     }
-
-    // Handle Mongoose validation errors (e.g., for minlength/maxlength if still present)
     if (error.name === 'ValidationError') {
       const errors = Object.keys(error.errors).map(key => ({ message: error.errors[key].message }));
       return res.status(400).json({
@@ -95,8 +118,7 @@ export const uploadMedia = async (req, res) => {
         message: "Validation failed for one or more fields."
       });
     }
-    // Handle Cloudinary upload errors
-    if (error.http_code) { // Cloudinary errors often have an http_code
+    if (error.http_code) {
       return res.status(error.http_code).json({
         statusCode: error.http_code,
         success: false,
@@ -104,7 +126,6 @@ export const uploadMedia = async (req, res) => {
         errors: [{ message: error.message }]
       });
     }
-
     res.status(500).json({
       statusCode: 500,
       success: false,
