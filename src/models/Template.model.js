@@ -47,7 +47,12 @@ const templateSchema = new mongoose.Schema({
     },
     contentType: {
       type: String,
-    }
+    },
+    // Optional: Size of the attachment in bytes
+    size: {
+      type: Number,
+      default: 0, // Default size is 0 if not provided
+    },
   }],
   
 }, {

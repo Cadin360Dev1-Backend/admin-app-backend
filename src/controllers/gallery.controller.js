@@ -1,30 +1,24 @@
 // src/controllers/gallery.controller.js
-import { CLIENT_RENEG_LIMIT } from 'tls';
 import cloudinary from '../config/cloudinaryConfig.js'; // Import the configured Cloudinary instance
 import { Gallery } from '../models/Gallery.model.js';   // Import the Gallery Mongoose model
 import fs from 'fs'; // Node.js file system module for deleting local files
-import { uploadToDrive } from '../utils/googleDriveUploader.js';
 
 /**
- * Controller function to upload media to Cloudinary or Google Drive and save its details to MongoDB.
- * 
- * - If the uploaded file is an image or video, it will be stored on Cloudinary.
- * - If the uploaded file is a PDF or ZIP, it will be stored on Google Drive.
- * 
- * POST /api/gallery/upload
- * 
- * Expected:
+ * Controller function to upload media to Cloudinary and save its details to MongoDB.
+ * * - All uploaded files (image, video, raw) will be stored on Cloudinary.
+ * * POST /api/gallery/upload
+ * * Expected:
  * - multipart/form-data with a 'media' field (file)
  * - Body fields can also include: 'title', 'description', 'category', 'tags'
- * 
- * Response:
- * - Returns the stored media URL (Cloudinary or Google Drive)
+ * * Response:
+ * - Returns the stored media URL (Cloudinary)
  * - Saves media details in MongoDB
  */
 
 export const uploadMedia = async (req, res) => {
   try {
-    const { title, description, category } = req.body;
+    // Ensure title, description, and category are properly destructured and default to empty string if not provided
+    const { title = '', description = '', category = 'Uncategorized' } = req.body;
     const tags = req.body.tags
       ? Array.isArray(req.body.tags)
         ? req.body.tags
@@ -33,7 +27,7 @@ export const uploadMedia = async (req, res) => {
 
     let mediaUrl = '';
     let mediaType = 'raw';
-    let cloudinaryPublicId = '';
+    let cloudinaryPublicId = ''; // Initialize cloudinaryPublicId
 
     if (!req.file) {
       return res.status(400).json({
@@ -49,49 +43,38 @@ export const uploadMedia = async (req, res) => {
     const uniqueFileName = `${Date.now()}_${baseName.replace(/\s+/g, '_')}`;
     const filePath = req.file.path;
 
-    const isPdf = mime === 'application/pdf';
-    const isZip = ['application/zip', 'application/x-zip-compressed'].includes(mime);
-    const isImage = mime.startsWith('image/');
-    const isVideo = mime.startsWith('video/');
-
-    if (isPdf || isZip) {
-      const { viewUrl } = await uploadToDrive(filePath, uniqueFileName, mime);
-      fs.unlink(filePath, () => {});
-      mediaUrl = viewUrl;
-      mediaType = isPdf ? 'pdf' : 'zip';
-      console.log(`📁 Uploaded to Google Drive as ${mediaType}: ${viewUrl}`);
-
-    } else if (isImage || isVideo) {
-      let resourceType = isImage ? 'image' : 'video';
-      const result = await cloudinary.uploader.upload(filePath, {
-        resource_type: resourceType,
-        folder: 'gallery_uploads',
-        public_id: uniqueFileName,
-        use_filename: true,
-        unique_filename: false,
-      });
-      fs.unlink(filePath, () => {});
-      mediaUrl = result.secure_url;
-      mediaType = result.resource_type;
-      cloudinaryPublicId = result.public_id;
-      console.log(`☁️ Uploaded to Cloudinary as ${mediaType}: ${result.secure_url}`);
-
+    let resourceType = 'auto'; // Default to auto detection by Cloudinary
+    if (mime.startsWith('image/')) {
+      resourceType = 'image';
+      mediaType = 'image';
+    } else if (mime.startsWith('video/')) {
+      resourceType = 'video';
+      mediaType = 'video';
     } else {
-      fs.unlink(filePath, () => {});
-      return res.status(400).json({
-        statusCode: 400,
-        success: false,
-        message: 'Unsupported file type. Only image, video, PDF, and ZIP are allowed.',
-      });
+      // For any other file types (PDF, ZIP, etc.), treat as 'raw' in Cloudinary
+      resourceType = 'raw';
+      mediaType = 'raw'; // Explicitly set to 'raw' for non-image/video files
     }
+
+    const result = await cloudinary.uploader.upload(filePath, {
+      resource_type: resourceType,
+      folder: 'gallery_uploads', // Specify a folder in Cloudinary
+      public_id: uniqueFileName,
+      use_filename: true,
+      unique_filename: false,
+    });
+    fs.unlink(filePath, () => {}); // Delete local file after upload
+    mediaUrl = result.secure_url;
+    cloudinaryPublicId = result.public_id; // Assign public_id for Cloudinary uploads
+    console.log(`☁️ Uploaded to Cloudinary as ${mediaType}: ${result.secure_url}`);
 
     const newGalleryItem = new Gallery({
       title,
       description,
       mediaUrl,
-      mediaType,
+      mediaType, // This will be 'image', 'video', or 'raw'
       originalName,
-      cloudinaryPublicId,
+      cloudinaryPublicId, // Make sure this is passed to the model
       category,
       tags,
     });
@@ -261,10 +244,13 @@ export const updateMedia = async (req, res) => {
       let resourceType = 'auto';
       if (req.file.mimetype.startsWith('image/')) {
         resourceType = 'image';
+        newMediaType = 'image';
       } else if (req.file.mimetype.startsWith('video/')) {
         resourceType = 'video';
+        newMediaType = 'video';
       } else {
         resourceType = 'raw';
+        newMediaType = 'raw';
       }
 
       // Upload the new file to Cloudinary
@@ -280,14 +266,21 @@ export const updateMedia = async (req, res) => {
 
       // Delete the old media from Cloudinary if a public ID exists
       if (existingMediaItem.cloudinaryPublicId) {
+        // We need to determine the correct resource_type for deletion based on the original mediaType
+        let oldResourceType = 'raw'; // Default for safety
+        if (existingMediaItem.mediaType === 'image') {
+            oldResourceType = 'image';
+        } else if (existingMediaItem.mediaType === 'video') {
+            oldResourceType = 'video';
+        }
+        
         const destroyResult = await cloudinary.uploader.destroy(existingMediaItem.cloudinaryPublicId, {
-          resource_type: existingMediaItem.mediaType // Specify resource type when destroying
+          resource_type: oldResourceType // Specify resource type when destroying
         });
         console.log('Old Cloudinary media deleted:', destroyResult);
       }
 
       newMediaUrl = uploadResult.secure_url;
-      newMediaType = uploadResult.resource_type;
       newCloudinaryPublicId = uploadResult.public_id;
     }
 
@@ -373,8 +366,16 @@ export const deleteMedia = async (req, res) => {
 
     // Delete the media from Cloudinary if a public ID exists
     if (mediaItem.cloudinaryPublicId) {
+        // Determine the correct resource_type for deletion based on the stored mediaType
+        let resourceTypeForDeletion = 'raw'; // Default to raw for safety
+        if (mediaItem.mediaType === 'image') {
+            resourceTypeForDeletion = 'image';
+        } else if (mediaItem.mediaType === 'video') {
+            resourceTypeForDeletion = 'video';
+        }
+
       const destroyResult = await cloudinary.uploader.destroy(mediaItem.cloudinaryPublicId, {
-        resource_type: mediaItem.mediaType // Specify resource type when destroying
+        resource_type: resourceTypeForDeletion // Specify resource type when destroying
       });
       console.log('Cloudinary deletion result:', destroyResult);
 

@@ -136,10 +136,11 @@ export const addTemplate = async (req, res) => {
         });
         attachmentsMetadata.push({
           filename: file.originalname,
+          size: file.size,
           secure_url: uploadResult.secure_url,
           public_id: uploadResult.public_id,
           contentType: file.mimetype,
-        });
+        }); 
         // Delete the local file after successful Cloudinary upload
         fs.unlink(file.path, (err) => {
           if (err) console.error("Error deleting local file after Cloudinary upload:", err);
@@ -199,7 +200,15 @@ export const addTemplate = async (req, res) => {
 /**
  * Controller function to update an existing email template.
  * PUT /api/templates/:id
- * Expected body: { templateName (optional), subject (optional), htmlContent (optional), type (optional), description (optional), attachments (optional) }
+ * Expected body: { 
+ * templateName (optional), 
+ * subject (optional), 
+ * htmlContent (optional), 
+ * type (optional), 
+ * description (optional),
+ * existingAttachmentPublicIds (optional, array of public_ids to KEEP)
+ * }
+ * Files are sent via multipart/form-data under the 'attachments' field.
  */
 export const updateTemplate = async (req, res) => {
   try {
@@ -207,11 +216,29 @@ export const updateTemplate = async (req, res) => {
     const updates = req.body;
     const uploadedFiles = req.files; // Multer's `upload.array` puts files directly into `req.files`
 
-    if (Object.keys(updates).length === 0 && (!uploadedFiles || uploadedFiles.length === 0)) {
+    // `existingAttachmentPublicIds` will be a comma-separated string if sent via FormData
+    let existingAttachmentPublicIds = [];
+    if (updates.existingAttachmentPublicIds) {
+      try {
+        // Try parsing as JSON array if sent as stringified JSON
+        existingAttachmentPublicIds = JSON.parse(updates.existingAttachmentPublicIds);
+      } catch (e) {
+        // If not JSON, assume comma-separated string
+        existingAttachmentPublicIds = updates.existingAttachmentPublicIds.split(',').map(id => id.trim()).filter(id => id);
+      }
+    }
+    
+    // Ensure existingAttachmentPublicIds is an array
+    if (!Array.isArray(existingAttachmentPublicIds)) {
+        existingAttachmentPublicIds = [];
+    }
+
+
+    if (Object.keys(updates).length === 0 && (!uploadedFiles || uploadedFiles.length === 0) && existingAttachmentPublicIds.length === 0) {
       return res.status(400).json({
         statusCode: 400,
         success: false,
-        errors: [{ message: "No update fields or files provided." }],
+        errors: [{ message: "No update fields, new files, or existing attachment public IDs provided." }],
         message: "No data to update."
       });
     }
@@ -261,36 +288,48 @@ export const updateTemplate = async (req, res) => {
       }
     }
 
-    let newAttachmentsMetadata = existingTemplate.attachments || [];
+    let currentAttachments = existingTemplate.attachments || [];
+    let attachmentsToKeep = [];
+    let attachmentsToDeleteFromCloudinary = [];
 
-    // If new files are uploaded, process them
-    if (uploadedFiles && uploadedFiles.length > 0) {
-      // Delete old attachments from Cloudinary
-      for (const attachment of existingTemplate.attachments) {
-        if (attachment.public_id) {
-          try {
-            await cloudinary.uploader.destroy(attachment.public_id, { resource_type: 'raw' }); // Assuming 'raw' for all email attachments
-            console.log(`Deleted old Cloudinary attachment: ${attachment.public_id}`);
-          } catch (destroyError) {
-            console.error(`Error deleting old Cloudinary attachment ${attachment.public_id}:`, destroyError);
-            // Continue even if old attachment deletion fails to avoid blocking the update
-          }
-        }
+    // Separate attachments to keep and attachments to delete
+    currentAttachments.forEach(attachment => {
+      if (attachment.public_id && existingAttachmentPublicIds.includes(attachment.public_id)) {
+        attachmentsToKeep.push(attachment);
+      } else if (attachment.public_id) {
+        attachmentsToDeleteFromCloudinary.push(attachment.public_id);
       }
+    });
 
-      // Upload new attachments to Cloudinary
-      newAttachmentsMetadata = []; // Reset attachments
+    // Delete old attachments from Cloudinary that are no longer requested to be kept
+    for (const publicId of attachmentsToDeleteFromCloudinary) {
+      try {
+        const destroyResult = await cloudinary.uploader.destroy(publicId, { resource_type: 'raw' });
+        console.log(`Deleted old Cloudinary attachment: ${publicId}. Result:`, destroyResult);
+        if (destroyResult.result !== 'ok' && destroyResult.result !== 'not found') {
+            console.error('Failed to delete attachment from Cloudinary:', destroyResult);
+        }
+      } catch (destroyError) {
+        console.error(`Error deleting old Cloudinary attachment ${publicId}:`, destroyError);
+        // Continue even if old attachment deletion fails to avoid blocking the update
+      }
+    }
+
+    // Upload new attachments to Cloudinary
+    const newUploadedAttachmentsMetadata = [];
+    if (uploadedFiles && uploadedFiles.length > 0) {
       for (const file of uploadedFiles) {
         try {
           const uploadResult = await cloudinary.uploader.upload(file.path, {
             folder: 'email_attachments',
             resource_type: 'auto',
           });
-          newAttachmentsMetadata.push({
+          newUploadedAttachmentsMetadata.push({
             filename: file.originalname,
             secure_url: uploadResult.secure_url,
             public_id: uploadResult.public_id,
             contentType: file.mimetype,
+            size: file.size,
           });
           // Delete local file after successful Cloudinary upload
           fs.unlink(file.path, (err) => {
@@ -301,7 +340,6 @@ export const updateTemplate = async (req, res) => {
           fs.unlink(file.path, (err) => {
             if (err) console.error("Error deleting local file after new Cloudinary upload failure:", err);
           });
-          // Rollback: If new uploads fail, consider reverting or indicating partial failure
           return res.status(500).json({
             statusCode: 500,
             success: false,
@@ -312,10 +350,13 @@ export const updateTemplate = async (req, res) => {
       }
     }
 
-    // Merge new attachments with updates, or just use existing if no new files were uploaded
+    // Combine attachments to keep and newly uploaded attachments
+    const finalAttachments = [...attachmentsToKeep, ...newUploadedAttachmentsMetadata];
+
+    // Prepare the update object
     const updateFields = {
       ...updates,
-      attachments: newAttachmentsMetadata,
+      attachments: finalAttachments, // Update with the final list of attachments
     };
 
     const updatedTemplate = await Template.findByIdAndUpdate(
