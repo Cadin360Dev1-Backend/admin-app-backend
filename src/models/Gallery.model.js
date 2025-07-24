@@ -6,13 +6,10 @@ const gallerySchema = new mongoose.Schema({
     type: String,
     // required: true, // Removed: no longer required
     trim: true, // Remove whitespace from both ends
-    minlength: [3, 'Title must be at least 3 characters long.'],
-    maxlength: [100, 'Title cannot exceed 100 characters.'],
   },
   description: {
     type: String,
     trim: true,
-    maxlength: [500, 'Description cannot exceed 500 characters.'],
     default: '', // Default to an empty string if not provided
   },
   mediaUrl: {
