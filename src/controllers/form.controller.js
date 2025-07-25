@@ -42,6 +42,7 @@ export const submitForm = async (req, res) => {
     }
 
     // --- Basic Server-Side Validation for Mandatory Fields ---
+    // These validations are for the form data itself, not the email log.
     if (!form_type || !page_Name || !page_url || !name || !email || !user_type ) {
       return res.status(400).json({
         statusCode: 400,
@@ -157,7 +158,9 @@ export const submitForm = async (req, res) => {
         contentType: attach.contentType
       }));
       
-      // Send the email using the mailer utility
+      // Send the email using the mailer utility.
+      // The sendEmail function in mailer.js is responsible for logging to EmailLog.model.js
+      // with Pending, Success, or Failed statuses.
       await sendEmail(email, finalSubject, finalHtmlContent, attachmentsForEmail);
     } catch (emailError) {
       console.error("Failed to send thank you email with attachments:", emailError);
@@ -231,6 +234,7 @@ export const submitSamplePdfForm = async (req, res) => {
     }
 
     // Validation for sample PDF form
+    // These validations are for the form data itself, not the email log.
     if (!name || !email || !page_Name || !page_url) {
       return res.status(400).json({
         statusCode: 400,
@@ -327,6 +331,8 @@ export const submitSamplePdfForm = async (req, res) => {
         path: path.join(process.cwd(), attach.path),
         contentType: attach.contentType
       }));
+      // The sendEmail function in mailer.js is responsible for logging to EmailLog.model.js
+      // with Pending, Success, or Failed statuses.
       await sendEmail(email, finalPdfSubject, finalPdfHtmlContent, attachmentsForEmail);
     } catch (emailError) {
       console.error("Failed to send sample PDF thank you email with attachments:", emailError);
@@ -413,6 +419,7 @@ export const handleThankYouSubmission = async (req, res) => {
     }
 
     // ✅ Dynamic missing field validation (only first email is checked)
+    // These validations are for the email sending parameters, not the email log.
     const firstEmail = parsedEmailData?.[0];
     const missingFields = [];
     if (!firstEmail?.toEmails || firstEmail.toEmails.length === 0) missingFields.push("toEmails");
@@ -475,28 +482,40 @@ export const handleThankYouSubmission = async (req, res) => {
           subject: subject || "(none)",
           attachmentsCount: attachmentsForEmail.length,
           status: "failed",
-          error: errorMsg
+          error: errorMsg,
+          emailLogId: null // No email log ID for invalid recipients as email wasn't attempted
         });
         allEmailsSentSuccessfully = false;
         continue;
       }
 
       try {
-        await sendEmail(recipientsArray, subject, message, attachmentsForEmail);
+        // IMPORTANT: The `sendEmail` function (in your mailer.js) is expected to:
+        // 1. Create an EmailLog entry with 'Pending' status.
+        // 2. Attempt to send the email.
+        // 3. Update the EmailLog entry with 'Success' or 'Failed' status,
+        //    including individual recipient statuses.
+        // 4. Return the ID of the created/updated EmailLog document.
+        const emailLogId = await sendEmail(recipientsArray, subject, message, attachmentsForEmail);
         sentEmailsInfo.push({
           recipients: recipientsArray,
           subject,
           attachmentsCount: attachmentsForEmail.length,
-          status: "success"
+          status: "success",
+          emailLogId: emailLogId // Store the log ID returned from mailer.js
         });
       } catch (emailError) {
         console.error(`Email send failed to ${recipientsArray.join(", ")}:`, emailError.message);
+        // If an error occurs here, it means `sendEmail` itself threw an exception.
+        // It's still possible that `sendEmail` created a 'Failed' log entry internally
+        // before throwing. For simplicity, we assume no successful `emailLogId` was returned.
         sentEmailsInfo.push({
           recipients: recipientsArray,
           subject,
           attachmentsCount: attachmentsForEmail.length,
           status: "failed",
-          error: emailError.message
+          error: emailError.message,
+          emailLogId: null // No emailLogId on a direct send failure from the mailer
         });
         allEmailsSentSuccessfully = false;
       }
