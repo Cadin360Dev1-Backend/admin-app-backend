@@ -11,6 +11,8 @@ const router = express.Router();
  * - Verifies the token using the JWT_SECRET.
  * - Attaches decoded admin information to `req.admin` for downstream handlers.
  * - If token is missing, invalid, or expired, returns a 401 Unauthorized response.
+ * - If a newer login occurred or the token is from an old session, clears the cookie.
+ *   Returns a 401 response with an appropriate message.
  */
 const authMiddleware = async (req, res, next) => { // Make middleware async
   const token = req.cookies.admin_token;

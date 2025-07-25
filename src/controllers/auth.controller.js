@@ -124,6 +124,7 @@ export const requestOtp = async (req, res) => {
  * - Validates the provided OTP.
  * - Checks OTP expiry.
  * - If successful, generates a JWT, sets it as an HttpOnly cookie, and clears the temporary email cookie.
+ * - Updates the admin's last login time and session token.
  * - Updates the lastLogin timestamp.
  */
 export const verifyOtp = async (req, res) => {
