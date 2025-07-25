@@ -1,6 +1,7 @@
 import express from 'express';
 import { requestOtp, verifyOtp, logoutAdmin, getMe } from '../controllers/auth.controller.js';
 import jwt from 'jsonwebtoken'; // Used for token verification in middleware
+import { Admin } from '../models/Admin.model.js'; // Import the Admin model
 
 const router = express.Router();
 
@@ -11,10 +12,9 @@ const router = express.Router();
  * - Attaches decoded admin information to `req.admin` for downstream handlers.
  * - If token is missing, invalid, or expired, returns a 401 Unauthorized response.
  */
-const authMiddleware = (req, res, next) => {
-  const token = req.cookies.admin_token; // Get the token from the cookie
+const authMiddleware = async (req, res, next) => { // Make middleware async
+  const token = req.cookies.admin_token;
 
-  // If no token is found, the user is not authenticated
   if (!token) {
     return res.status(401).json({
       statusCode: 401,
@@ -25,13 +25,36 @@ const authMiddleware = (req, res, next) => {
   }
 
   try {
-    // Verify the token using the secret key
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.admin = decoded; // Attach the decoded payload (e.g., adminId, email) to the request object
-    next(); // Proceed to the next middleware or route handler
+
+    // Retrieve the admin from the database to check the session token
+    const admin = await Admin.findById(decoded.adminId);
+
+    if (!admin || admin.sessionToken !== decoded.sessionToken) {
+      // If admin not found or session token does not match, it means a newer login occurred
+      // or the token is from an old session. Clear the cookie.
+      res.clearCookie('admin_token', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'None',
+      });
+      return res.status(401).json({
+        statusCode: 401,
+        success: false,
+        errors: [{ message: "Your session is no longer active. Please log in again." }],
+        message: "Your session is no longer active. Please log in again."
+      });
+    }
+
+    req.admin = decoded;
+    next();
   } catch (err) {
-    // If token verification fails (e.g., invalid signature, expired token)
     console.error("JWT verification failed:", err.message);
+    res.clearCookie('admin_token', { // Clear cookie on any JWT verification failure
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'None',
+    });
     return res.status(401).json({
       statusCode: 401,
       success: false,

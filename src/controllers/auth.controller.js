@@ -1,17 +1,18 @@
 import { Admin } from '../models/Admin.model.js';
 import { sendOtpEmail } from '../utils/mailer.js';
 import jwt from 'jsonwebtoken';
+import { v4 as uuidv4 } from 'uuid'; // Import uuid for generating unique session tokens
 
 // Define the allowed admin emails for login
 const ALLOWED_ADMIN_EMAILS = [
   'cadin360@gmail.com',
-  'SNJHA362@gmail.com',
+  'snjha362@gmail.com',
   'support.cadin360@gmail.com'
 ];
-
+ 
 // Define the main admin email for OTP forwarding (if 'support.cadin360@gmail.com' requests OTP)
 const MAIN_ADMIN_EMAIL = 'cadin360@gmail.com';
-const SECONDARY_ADMIN_EMAIL = 'SNJHA362@gmail.com'; // Secondary admin email for support OTPs
+const SECONDARY_ADMIN_EMAIL = 'snjha362@gmail.com'; // Secondary admin email for support OTPs
 
 /**
  * Handles the request for an OTP.
@@ -206,34 +207,37 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
+ // Generate a new session token
+    const newSessionToken = uuidv4();
+
     // If OTP is valid and not expired:
-    // Generate JWT token
+    // Generate JWT token including the new sessionToken
     const token = jwt.sign(
-      { adminId: admin._id, email: admin.email },
+      { adminId: admin._id, email: admin.email, sessionToken: newSessionToken }, // Include sessionToken in JWT
       process.env.JWT_SECRET,
-      { expiresIn: '1d' } // Token valid for 1 day
+      { expiresIn: '1d' }
     );
 
-    // Update last login time
+    // Update last login time and sessionToken
     admin.lastLogin = new Date();
-    // Clear OTP from database after successful verification
     admin.otp = null;
     admin.otpExpiresAt = null;
+    admin.sessionToken = newSessionToken; // Save the new session token to the database
     await admin.save();
 
-    // Clear the temporary admin_email cookie (using sameSite: 'None' for consistency)
+    // Clear the temporary admin_email cookie
     res.clearCookie('admin_email', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'None', // Changed from 'Lax' to 'None'
+      sameSite: 'None',
     });
 
     // Set JWT token as an HttpOnly cookie
     res.cookie('admin_token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production', // MUST be true if sameSite is 'None'
-      maxAge: 24 * 60 * 60 * 1000, // 1 day
-      sameSite: 'None', // Changed from 'Lax' to 'None'
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 24 * 60 * 60 * 1000,
+      sameSite: 'None',
     });
 
     res.status(200).json({
@@ -241,7 +245,7 @@ export const verifyOtp = async (req, res) => {
       success: true,
       message: "OTP verified successfully. Login successful.",
       data: {
-        admin_token: token, // Optionally send token in response for immediate client use
+        admin_token: token,
         email: admin.email,
         id: admin._id
       }
@@ -257,6 +261,8 @@ export const verifyOtp = async (req, res) => {
     });
   }
 };
+
+
 
 /**
  * Handles admin logout.

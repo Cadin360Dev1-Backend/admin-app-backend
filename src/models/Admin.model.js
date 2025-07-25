@@ -25,6 +25,10 @@ const adminSchema = new mongoose.Schema({
     type: Date,
     // Records the timestamp of the last successful login
   },
+  sessionToken: { // Add this new field
+    type: String,
+    default: null, // It will be null until a successful login
+  },
 }, {
   timestamps: true // Adds `createdAt` and `updatedAt` fields automatically
 });
