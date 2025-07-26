@@ -171,9 +171,8 @@ export const retryFailedEmails = async (req, res) => {
       const ccEmails = log.cc.map(rec => rec.email);
       const bccEmails = log.bcc.map(rec => rec.email);
       const subject = log.subject;
-      // Use htmlContentPreview as the content for retry.
-      // Note: If the original htmlContent was very long, htmlContentPreview might be truncated.
-      const htmlContent = log.htmlContentPreview;
+      // Use htmlContent as the content for retry.
+      const htmlContent = log.htmlContent;
 
       // Prepare attachments for Nodemailer. Prioritize secure_url (Cloudinary) over local path.
       const attachmentsForRetry = log.attachments.map(att => ({

@@ -62,8 +62,8 @@ const emailLogSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
-  htmlContentPreview: {
-    type: String, // A snippet (e.g., first 500 characters) of the HTML content for reference
+  htmlContent: { // Changed from htmlContentPreview to htmlContent
+    type: String, // Stores the full HTML content
   },
   attachments: [attachmentLogSchema], // Array of attachment metadata
   overallStatus: {

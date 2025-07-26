@@ -62,8 +62,7 @@ export const sendEmail = async (toEmail, subject, htmlContent, attachments = [],
       cc: ccRecipients,
       bcc: bccRecipients,
       subject: subject,
-      // Store a preview of the HTML content (e.g., first 500 characters)
-      htmlContentPreview: htmlContent ? htmlContent.substring(0, Math.min(htmlContent.length, 500)) : '',
+      htmlContent: htmlContent, // Store the full HTML content
       attachments: attachments.map(att => ({
         filename: att.filename,
         contentType: att.contentType,
