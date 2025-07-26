@@ -5,6 +5,8 @@ import authRoutes from './routes/auth.route.js';
 import formRoutes from './routes/form.route.js';
 import templateRoutes from './routes/template.route.js'; //Import template routes
 import galleryRoutes from './routes/gallery.route.js'; // Import gallery routes
+import emailLogRoutes from './routes/emailLog.route.js'; // Import email log routes
+
 
 
 const app = express();
@@ -55,6 +57,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/form', formRoutes);
 app.use('/api/templates', templateRoutes); // Use template routes
 app.use('/api/gallery', galleryRoutes); // Use gallery routes
+app.use('/api/email-logs', emailLogRoutes); // Use email log routes
 
 
 // Root route for server status
