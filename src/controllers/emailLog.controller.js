@@ -142,3 +142,101 @@ export const deleteEmailLog = async (req, res) => {
     });
   }
 };
+
+/**
+ * Controller function to retry sending emails that previously failed.
+ * This will fetch all email logs with overallStatus: "Failed" and attempt to resend them.
+ * Each retry will generate a new EmailLog entry.
+ * POST /api/email-logs/retry-failed
+ */
+export const retryFailedEmails = async (req, res) => {
+  try {
+    const failedEmailLogs = await EmailLog.find({ overallStatus: 'Failed' });
+
+    if (failedEmailLogs.length === 0) {
+      return res.status(200).json({
+        statusCode: 200,
+        success: true,
+        message: "No failed emails found to retry.",
+        retriedCount: 0,
+        results: [],
+      });
+    }
+
+    const retryResults = [];
+
+    for (const log of failedEmailLogs) {
+      // Extract necessary data from the failed log
+      const toEmails = log.to.map(rec => rec.email);
+      const ccEmails = log.cc.map(rec => rec.email);
+      const bccEmails = log.bcc.map(rec => rec.email);
+      const subject = log.subject;
+      // Use htmlContentPreview as the content for retry.
+      // Note: If the original htmlContent was very long, htmlContentPreview might be truncated.
+      const htmlContent = log.htmlContentPreview;
+
+      // Prepare attachments for Nodemailer. Prioritize secure_url (Cloudinary) over local path.
+      const attachmentsForRetry = log.attachments.map(att => ({
+        filename: att.filename,
+        path: att.secure_url || att.path, // Nodemailer can use URLs directly for remote files
+        contentType: att.contentType,
+      }));
+
+      try {
+        // Attempt to resend the email. This will create a NEW EmailLog entry.
+        const newEmailLogId = await sendEmail(
+          toEmails,
+          subject,
+          htmlContent,
+          attachmentsForRetry,
+          ccEmails.length > 0 ? ccEmails : null,
+          bccEmails.length > 0 ? bccEmails : null,
+          log.relatedFormSubmissionId // Link to original form submission if any
+        );
+
+        retryResults.push({
+          originalLogId: log._id,
+          status: 'success',
+          newLogId: newEmailLogId,
+          message: `Email retried successfully. New log ID: ${newEmailLogId}`,
+        });
+      } catch (retryError) {
+        console.error(`Error retrying email log ${log._id}:`, retryError);
+        retryResults.push({
+          originalLogId: log._id,
+          status: 'failed',
+          newLogId: null,
+          message: `Failed to retry email: ${retryError.message}`,
+        });
+      }
+    }
+
+    const successfulRetries = retryResults.filter(r => r.status === 'success').length;
+    const failedRetries = retryResults.filter(r => r.status === 'failed').length;
+
+    let responseMessage = `Attempted to retry ${failedEmailLogs.length} failed emails. `;
+    if (successfulRetries > 0) {
+      responseMessage += `${successfulRetries} succeeded. `;
+    }
+    if (failedRetries > 0) {
+      responseMessage += `${failedRetries} failed.`;
+    }
+
+    res.status(200).json({
+      statusCode: 200,
+      success: failedRetries === 0, // Overall success if no retries failed
+      message: responseMessage,
+      retriedCount: successfulRetries,
+      results: retryResults,
+    });
+
+  } catch (error) {
+    console.error("Unhandled error during retryFailedEmails:", error);
+    res.status(500).json({
+      statusCode: 500,
+      success: false,
+      errors: [{ message: "An unexpected internal server error occurred while retrying failed emails." }],
+      message: "Internal server error."
+    });
+  }
+};
